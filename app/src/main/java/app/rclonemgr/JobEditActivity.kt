@@ -31,6 +31,8 @@ class JobEditActivity : AppCompatActivity() {
     private lateinit var srcBox: TextInputLayout
     private lateinit var remoteDd: MaterialAutoCompleteTextView
     private lateinit var pathEt: TextInputEditText
+    private lateinit var excludeEt: TextInputEditText
+    private lateinit var includeEt: TextInputEditText
     private lateinit var modeGroup: MaterialButtonToggleGroup
     private lateinit var trigGroup: MaterialButtonToggleGroup
     private lateinit var intervalBox: View
@@ -60,6 +62,7 @@ class JobEditActivity : AppCompatActivity() {
         intervalBox = findViewById(R.id.intervalBox); intervalEt = findViewById(R.id.interval)
         timeBox = findViewById(R.id.timeBox); timeBtn = findViewById(R.id.btnPickTime)
         daysGroup = findViewById(R.id.days); wifiSw = findViewById(R.id.wifi); chargeSw = findViewById(R.id.charge)
+        excludeEt = findViewById(R.id.exclude); includeEt = findViewById(R.id.include)
 
         srcBox.setEndIconOnClickListener { pickDir.launch(null) }
         remoteDd.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, RcloneRunner.remotes(this)))
@@ -91,6 +94,7 @@ class JobEditActivity : AppCompatActivity() {
             hour = j.hour; minute = j.minute
             for (i in 0..6) (daysGroup.getChildAt(i) as Chip).isChecked = (j.days and (1 shl i)) != 0
             wifiSw.isChecked = j.wifiOnly; chargeSw.isChecked = j.chargingOnly
+            excludeEt.setText(j.exclude); includeEt.setText(j.include)
         } ?: run {
             tb.title = "Job baru"
             modeGroup.check(R.id.mCopy); trigGroup.check(R.id.tInterval)
@@ -129,6 +133,7 @@ class JobEditActivity : AppCompatActivity() {
             intervalMin = if (interval >= 15) interval else 60,
             hour = hour, minute = minute, days = days,
             wifiOnly = wifiSw.isChecked, chargingOnly = chargeSw.isChecked,
+            exclude = excludeEt.text.toString().trim(), include = includeEt.text.toString().trim(),
             enabled = editing?.enabled ?: true,
             lastRun = editing?.lastRun ?: 0, lastStatus = editing?.lastStatus ?: ""
         )
@@ -140,7 +145,7 @@ class JobEditActivity : AppCompatActivity() {
     private fun confirmDelete(j: Job) {
         MaterialAlertDialogBuilder(this).setTitle("Hapus job?").setMessage(j.name)
             .setPositiveButton("Hapus") { _, _ ->
-                Scheduler.cancel(this, j.id); JobStore.delete(this, j.id); finish()
+                Scheduler.cancel(this, j.id); JobStore.delete(this, j.id); JobLog.clear(this, j.id); finish()
             }.setNegativeButton("Batal", null).show()
     }
 

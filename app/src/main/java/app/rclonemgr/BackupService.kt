@@ -51,7 +51,7 @@ class BackupService : Service() {
 
     override fun onStartCommand(i: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
-        startForeground(NID, buildRun("Rclone Manager", "Menyiapkan…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        startForeground(NID, buildRun("Rclone Manager", "Preparing…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
 
         if (i?.action == ACTION_STOP) {
             stopped = true
@@ -88,13 +88,13 @@ class BackupService : Service() {
     private fun runJob(id: String) {
         if (stopped) return
         val job = JobStore.get(this, id) ?: return
-        notifyRun(job.name, "Mulai…", true)
+        notifyRun(job.name, "Starting…", true)
         val code = RcloneRunner.run(this, job, { proc = it }) { notifyRun(job.name, it, false) }
         job.lastRun = System.currentTimeMillis()
         job.lastStatus = when {
-            stopped -> "Dibatalkan"
-            code == 0 -> "Sukses"
-            else -> "Gagal (kode $code)"
+            stopped -> "Cancelled"
+            code == 0 -> "Success"
+            else -> "Failed (code $code)"
         }
         JobStore.save(this, job)
         getSystemService(NotificationManager::class.java).notify(

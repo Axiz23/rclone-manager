@@ -18,7 +18,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val why = Conditions.unmet(ctx, job)
         if (why != null) {
-            job.lastStatus = "Ditunda: $why"
+            job.lastStatus = "Deferred: $why"
             JobStore.save(ctx, job)
             val retryAt = System.currentTimeMillis() + Scheduler.RETRY_MS
             if (Scheduler.nextTrigger(job) > retryAt) Scheduler.setAt(ctx, job.id, retryAt)
@@ -27,7 +27,7 @@ class AlarmReceiver : BroadcastReceiver() {
         try {
             ctx.startForegroundService(BackupService.intent(ctx, job.id))
         } catch (e: Exception) {
-            job.lastStatus = "Gagal start service (${e.javaClass.simpleName}). Beri izin alarm tepat waktu."
+            job.lastStatus = "Failed to start service (${e.javaClass.simpleName}). Grant the exact alarm permission."
             JobStore.save(ctx, job)
         }
     }

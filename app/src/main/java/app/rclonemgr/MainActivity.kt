@@ -128,9 +128,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLog(j: Job) {
-        val f = RcloneRunner.logFile(this, j.id)
-        val text = if (f.exists()) f.readText() else "Belum ada log."
-        MaterialAlertDialogBuilder(this).setTitle(j.name).setMessage(text).setPositiveButton("Tutup", null).show()
+        val lines = JobLog.read(this, j.id)
+        val text = if (lines.isEmpty()) "Belum ada log." else lines.joinToString("\n")
+        MaterialAlertDialogBuilder(this)
+            .setTitle("${j.name} (${JobLog.SHOW_LINES} baris terakhir)")
+            .setMessage(text)
+            .setPositiveButton("Tutup", null)
+            .setNeutralButton("Hapus log") { _, _ -> JobLog.clear(this, j.id) }
+            .show()
     }
 
     private fun importConf(uri: Uri) {

@@ -23,7 +23,9 @@ class Job(
     val days: Int,            // bit0 = Senin ... bit6 = Minggu
     val wifiOnly: Boolean,
     val chargingOnly: Boolean,
-    var enabled: Boolean,
+    val exclude: String = "",   // one pattern per line
+    val include: String = "",   // one pattern per line (optional)
+    var enabled: Boolean = true,
     var lastRun: Long = 0,
     var lastStatus: String = ""
 ) {
@@ -43,16 +45,20 @@ class Job(
         .put("trigger", trigger).put("intervalMin", intervalMin)
         .put("hour", hour).put("minute", minute).put("days", days)
         .put("wifiOnly", wifiOnly).put("chargingOnly", chargingOnly)
+        .put("exclude", exclude).put("include", include)
         .put("enabled", enabled).put("lastRun", lastRun).put("lastStatus", lastStatus)
 
     companion object {
         fun fromJson(o: JSONObject) = Job(
-            o.getString("id"), o.optString("name"), o.optString("source"),
-            o.optString("remote"), o.optString("remotePath"), o.optBoolean("sync"),
-            o.optInt("trigger"), o.optInt("intervalMin", 60),
-            o.optInt("hour", 2), o.optInt("minute"), o.optInt("days", 0x7F),
-            o.optBoolean("wifiOnly", true), o.optBoolean("chargingOnly"),
-            o.optBoolean("enabled", true), o.optLong("lastRun"), o.optString("lastStatus")
+            id = o.getString("id"), name = o.optString("name"), source = o.optString("source"),
+            remote = o.optString("remote"), remotePath = o.optString("remotePath"),
+            sync = o.optBoolean("sync"), trigger = o.optInt("trigger"),
+            intervalMin = o.optInt("intervalMin", 60), hour = o.optInt("hour", 2),
+            minute = o.optInt("minute"), days = o.optInt("days", 0x7F),
+            wifiOnly = o.optBoolean("wifiOnly", true), chargingOnly = o.optBoolean("chargingOnly"),
+            exclude = o.optString("exclude"), include = o.optString("include"),
+            enabled = o.optBoolean("enabled", true), lastRun = o.optLong("lastRun"),
+            lastStatus = o.optString("lastStatus")
         )
     }
 }

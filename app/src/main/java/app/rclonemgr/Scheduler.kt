@@ -64,12 +64,12 @@ object Conditions {
     fun unmet(ctx: Context, job: Job): String? {
         val cm = ctx.getSystemService(ConnectivityManager::class.java)
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
-        if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return "tidak ada jaringan"
+        if (caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return "no network"
         if (job.wifiOnly && !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
-            return "bukan Wi-Fi/jaringan unmetered"
+            return "not on Wi-Fi / unmetered network"
         if (job.chargingOnly) {
             val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            if ((b?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) == 0) return "tidak sedang mengisi daya"
+            if ((b?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) == 0) return "not charging"
         }
         return null
     }
