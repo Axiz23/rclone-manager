@@ -31,7 +31,7 @@
                 style="?attr/textInputOutlinedStyle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Nama job">
+                android:hint="Job name">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/name"
                     android:layout_width="match_parent"
@@ -45,7 +45,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="Folder sumber (mis. /storage/emulated/0/DCIM)"
+                android:hint="Source folder (e.g. /storage/emulated/0/DCIM)"
                 app:endIconDrawable="@drawable/ic_folder"
                 app:endIconMode="custom">
                 <com.google.android.material.textfield.TextInputEditText
@@ -73,7 +73,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="Path di remote (mis. backup/foto)">
+                android:hint="Remote path (e.g. backup/photos)">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/remotePath"
                     android:layout_width="match_parent"
@@ -99,7 +99,7 @@
                     style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Copy (aman)" />
+                    android:text="Copy (safe)" />
                 <Button
                     android:id="@+id/mSync"
                     style="?attr/materialButtonOutlinedStyle"
@@ -111,7 +111,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Sync menghapus file di remote yang tidak ada di sumber."
+                android:text="Sync deletes files on the remote that are not in the source."
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -119,7 +119,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="Pemicu"
+                android:text="Trigger"
                 android:textAppearance="?attr/textAppearanceTitleSmall" />
             <com.google.android.material.button.MaterialButtonToggleGroup
                 android:id="@+id/trigGroup"
@@ -139,7 +139,7 @@
                     style="?attr/materialButtonOutlinedStyle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Waktu" />
+                    android:text="Time" />
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
             <com.google.android.material.textfield.TextInputLayout
@@ -148,8 +148,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="Setiap (minimal 15)"
-                app:suffixText="menit">
+                android:hint="Every (minimum 15)"
+                app:suffixText="minutes">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/interval"
                     android:layout_width="match_parent"
@@ -179,14 +179,14 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="Filter"
+                android:text="Filters"
                 android:textAppearance="?attr/textAppearanceTitleSmall" />
             <com.google.android.material.textfield.TextInputLayout
                 style="?attr/textInputOutlinedStyle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="Exclude (satu pola per baris)">
+                android:hint="Exclude (one pattern per line)">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/exclude"
                     android:layout_width="match_parent"
@@ -200,7 +200,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="Include saja (opsional, satu pola per baris)">
+                android:hint="Include only (optional, one pattern per line)">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/include"
                     android:layout_width="match_parent"
@@ -213,7 +213,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Contoh: *.tmp  ·  .thumbnails/**  ·  /Android/**  ·  *.{jpg,mp4}. Baris diawali # diabaikan. Exclude diproses lebih dulu; jika Include diisi, file lain tidak ikut."
+                android:text="Examples: *.tmp  ·  .thumbnails/**  ·  /Android/**  ·  *.{jpg,mp4}. Lines starting with # are ignored. Excludes are applied first; if Include is set, all other files are skipped."
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -222,20 +222,20 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
-                android:text="Hanya Wi-Fi / jaringan unmetered" />
+                android:text="Wi-Fi / unmetered network only" />
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/charge"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Hanya saat mengisi daya" />
+                android:text="Only while charging" />
 
             <Button
                 android:id="@+id/btnSave"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="24dp"
-                android:text="Simpan" />
+                android:text="Save" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

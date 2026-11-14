@@ -7,7 +7,7 @@ import java.io.File
 
 const val TRIGGER_INTERVAL = 0
 const val TRIGGER_TIME = 1
-val DAY_NAMES = arrayOf("Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min")
+val DAY_NAMES = arrayOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 class Job(
     val id: String,
@@ -20,7 +20,7 @@ class Job(
     val intervalMin: Int,
     val hour: Int,
     val minute: Int,
-    val days: Int,            // bit0 = Senin ... bit6 = Minggu
+    val days: Int,            // bit0 = Monday ... bit6 = Sunday
     val wifiOnly: Boolean,
     val chargingOnly: Boolean,
     val exclude: String = "",   // one pattern per line
@@ -32,10 +32,10 @@ class Job(
     fun dest() = "$remote:$remotePath"
 
     fun triggerText(): String =
-        if (trigger == TRIGGER_INTERVAL) "Setiap $intervalMin menit"
+        if (trigger == TRIGGER_INTERVAL) "Every $intervalMin min"
         else "%02d:%02d · %s".format(
             hour, minute,
-            if (days == 0x7F) "setiap hari"
+            if (days == 0x7F) "every day"
             else DAY_NAMES.filterIndexed { i, _ -> (days and (1 shl i)) != 0 }.joinToString(", ")
         )
 

@@ -46,7 +46,7 @@ class JobEditActivity : AppCompatActivity() {
     private val pickDir = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             val p = Paths.treeUriToPath(uri)
-            if (p != null) srcEt.setText(p) else toast("Pilih folder di penyimpanan internal / SD card")
+            if (p != null) srcEt.setText(p) else toast("Pick a folder on internal storage or an SD card")
         }
     }
 
@@ -96,7 +96,7 @@ class JobEditActivity : AppCompatActivity() {
             wifiSw.isChecked = j.wifiOnly; chargeSw.isChecked = j.chargingOnly
             excludeEt.setText(j.exclude); includeEt.setText(j.include)
         } ?: run {
-            tb.title = "Job baru"
+            tb.title = "New job"
             modeGroup.check(R.id.mCopy); trigGroup.check(R.id.tInterval)
             intervalEt.setText("60"); wifiSw.isChecked = true
         }
@@ -110,7 +110,7 @@ class JobEditActivity : AppCompatActivity() {
         timeBox.visibility = if (interval) View.GONE else View.VISIBLE
     }
 
-    private fun updateTimeBtn() { timeBtn.text = "Pukul %02d:%02d".format(hour, minute) }
+    private fun updateTimeBtn() { timeBtn.text = "At %02d:%02d".format(hour, minute) }
 
     private fun save() {
         val name = nameEt.text.toString().trim()
@@ -120,9 +120,9 @@ class JobEditActivity : AppCompatActivity() {
         val interval = intervalEt.text.toString().toIntOrNull() ?: 0
         val days = (0..6).fold(0) { a, i -> if ((daysGroup.getChildAt(i) as Chip).isChecked) a or (1 shl i) else a }
 
-        if (name.isEmpty() || src.isEmpty() || remote.isEmpty()) return toast("Nama, sumber, dan remote wajib diisi")
-        if (isInterval && interval < 15) return toast("Interval minimal 15 menit")
-        if (!isInterval && days == 0) return toast("Pilih minimal satu hari")
+        if (name.isEmpty() || src.isEmpty() || remote.isEmpty()) return toast("Name, source and remote are required")
+        if (isInterval && interval < 15) return toast("Minimum interval is 15 minutes")
+        if (!isInterval && days == 0) return toast("Select at least one day")
 
         val job = Job(
             id = editing?.id ?: UUID.randomUUID().toString().take(8),
@@ -143,10 +143,10 @@ class JobEditActivity : AppCompatActivity() {
     }
 
     private fun confirmDelete(j: Job) {
-        MaterialAlertDialogBuilder(this).setTitle("Hapus job?").setMessage(j.name)
-            .setPositiveButton("Hapus") { _, _ ->
+        MaterialAlertDialogBuilder(this).setTitle("Delete job?").setMessage(j.name)
+            .setPositiveButton("Delete") { _, _ ->
                 Scheduler.cancel(this, j.id); JobStore.delete(this, j.id); JobLog.clear(this, j.id); finish()
-            }.setNegativeButton("Batal", null).show()
+            }.setNegativeButton("Cancel", null).show()
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()

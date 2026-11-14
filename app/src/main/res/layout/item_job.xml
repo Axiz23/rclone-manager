@@ -70,7 +70,7 @@
                 style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Jalankan sekarang" />
+                android:text="Run now" />
         </LinearLayout>
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

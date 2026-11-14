@@ -41,8 +41,8 @@ class BackupService : Service() {
     override fun onCreate() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CH_RUN, "Backup berjalan", NotificationManager.IMPORTANCE_LOW))
-        nm.createNotificationChannel(NotificationChannel(CH_DONE, "Hasil backup", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_RUN, "Backup running", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_DONE, "Backup results", NotificationManager.IMPORTANCE_DEFAULT))
         wl = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "rclonemgr:backup")
             .apply { setReferenceCounted(false); acquire(6 * 3600_000L) }
@@ -119,7 +119,7 @@ class BackupService : Service() {
             .setContentTitle(title).setContentText(text)
             .setOngoing(true).setOnlyAlertOnce(true)
             .setContentIntent(openApp())
-            .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stop), "Batal", stop).build())
+            .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stop), "Cancel", stop).build())
             .build()
     }
 

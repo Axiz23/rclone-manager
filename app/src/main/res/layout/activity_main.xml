@@ -62,7 +62,7 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="end"
                         android:layout_marginTop="8dp"
-                        android:text="Beri izin" />
+                        android:text="Grant permission" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -78,7 +78,7 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:padding="32dp"
-                android:text="Belum ada job backup.\nKetuk “Tambah job” untuk memulai."
+                android:text="No backup jobs yet.\nTap “Add job” to get started."
                 android:textAppearance="?attr/textAppearanceBodyLarge"
                 android:textColor="?attr/colorOnSurfaceVariant" />
         </LinearLayout>
@@ -90,6 +90,6 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
-        android:text="Tambah job"
+        android:text="Add job"
         app:icon="@drawable/ic_add" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
