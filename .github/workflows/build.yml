@@ -75,7 +75,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon
 
-         - name: Show signing certificate
+      - name: Show signing certificate
         run: |
           AS=$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)
           $AS verify --print-certs app/build/outputs/apk/release/*.apk
