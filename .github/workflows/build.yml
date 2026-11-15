@@ -68,7 +68,6 @@ jobs:
             echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
             echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
           fi
-
       - name: Build release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -76,12 +75,13 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon
 
+         - name: Show signing certificate
+        run: |
+          AS=$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)
+          $AS verify --print-certs app/build/outputs/apk/release/*.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: rclone-manager-arm64
           path: app/build/outputs/apk/release/*.apk
-
-      - name: Show signing certificate
-        run: |
-          AS=$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)
-          $AS verify --print-certs app/build/outputs/apk/release/*.apk
+          
