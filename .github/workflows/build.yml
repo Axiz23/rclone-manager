@@ -80,3 +80,8 @@ jobs:
         with:
           name: rclone-manager-arm64
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Show signing certificate
+        run: |
+          AS=$(ls $ANDROID_HOME/build-tools/*/apksigner | tail -1)
+          $AS verify --print-certs app/build/outputs/apk/release/*.apk
