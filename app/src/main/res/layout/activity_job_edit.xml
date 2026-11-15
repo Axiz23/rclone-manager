@@ -7,8 +7,11 @@
     android:orientation="vertical">
 
     <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appbar"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:liftOnScroll="false">
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
@@ -216,6 +219,20 @@
                 android:text="Examples: *.tmp  ·  .thumbnails/**  ·  /Android/**  ·  *.{jpg,mp4}. Lines starting with # are ignored. Excludes are applied first; if Include is set, all other files are skipped."
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="?attr/colorOnSurfaceVariant" />
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="?attr/textInputOutlinedStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:hint="Parallel transfers (1-8)"
+                app:helperText="Higher is faster for many small files but uses more memory. Default 4.">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/transfers"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number" />
+            </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/wifi"

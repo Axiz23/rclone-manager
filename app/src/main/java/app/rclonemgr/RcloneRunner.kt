@@ -64,8 +64,8 @@ object RcloneRunner {
                 bin.path, mode, job.source, job.dest(),
                 "--config", confFile(ctx).path,
                 "--cache-dir", ctx.cacheDir.path,
-                "--transfers", "1", "--checkers", "2",
-                "--buffer-size", "4M", "--use-mmap", "--max-backlog", "500",
+                "--transfers", job.transfers.toString(), "--checkers", maxOf(2, job.transfers).toString(),
+                "--buffer-size", if (job.transfers > 4) "2M" else "4M", "--use-mmap", "--max-backlog", "500",
                 "--retries", "2", "--low-level-retries", "5",
                 "--stats", "3s", "--stats-one-line", "--stats-log-level", "NOTICE"
             )

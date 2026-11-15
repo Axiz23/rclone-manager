@@ -39,7 +39,7 @@ class MainActivity : AppCompatActivity() {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
         setContentView(R.layout.activity_main)
-        applyInsets(findViewById(R.id.root))
+        applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
         info = findViewById(R.id.info)

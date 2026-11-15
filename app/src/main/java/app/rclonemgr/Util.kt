@@ -24,12 +24,14 @@ object Paths {
     }
 }
 
-fun Activity.applyInsets(root: View) {
+/** The app bar draws under the status bar (same color); other insets pad the root. */
+fun Activity.applyInsets(root: View, appBar: View) {
     ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
         val b = insets.getInsets(
             WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
         )
-        v.setPadding(b.left, b.top, b.right, b.bottom)
+        appBar.setPadding(0, b.top, 0, 0)
+        v.setPadding(b.left, 0, b.right, b.bottom)
         WindowInsetsCompat.CONSUMED
     }
 }

@@ -33,6 +33,7 @@ class JobEditActivity : AppCompatActivity() {
     private lateinit var pathEt: TextInputEditText
     private lateinit var excludeEt: TextInputEditText
     private lateinit var includeEt: TextInputEditText
+    private lateinit var transfersEt: TextInputEditText
     private lateinit var modeGroup: MaterialButtonToggleGroup
     private lateinit var trigGroup: MaterialButtonToggleGroup
     private lateinit var intervalBox: View
@@ -54,7 +55,7 @@ class JobEditActivity : AppCompatActivity() {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
         setContentView(R.layout.activity_job_edit)
-        applyInsets(findViewById(R.id.root))
+        applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
 
         nameEt = findViewById(R.id.name); srcEt = findViewById(R.id.source); srcBox = findViewById(R.id.sourceBox)
         remoteDd = findViewById(R.id.remote); pathEt = findViewById(R.id.remotePath)
@@ -63,6 +64,7 @@ class JobEditActivity : AppCompatActivity() {
         timeBox = findViewById(R.id.timeBox); timeBtn = findViewById(R.id.btnPickTime)
         daysGroup = findViewById(R.id.days); wifiSw = findViewById(R.id.wifi); chargeSw = findViewById(R.id.charge)
         excludeEt = findViewById(R.id.exclude); includeEt = findViewById(R.id.include)
+        transfersEt = findViewById(R.id.transfers)
 
         srcBox.setEndIconOnClickListener { pickDir.launch(null) }
         remoteDd.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, RcloneRunner.remotes(this)))
@@ -95,10 +97,11 @@ class JobEditActivity : AppCompatActivity() {
             for (i in 0..6) (daysGroup.getChildAt(i) as Chip).isChecked = (j.days and (1 shl i)) != 0
             wifiSw.isChecked = j.wifiOnly; chargeSw.isChecked = j.chargingOnly
             excludeEt.setText(j.exclude); includeEt.setText(j.include)
+            transfersEt.setText(j.transfers.toString())
         } ?: run {
             tb.title = "New job"
             modeGroup.check(R.id.mCopy); trigGroup.check(R.id.tInterval)
-            intervalEt.setText("60"); wifiSw.isChecked = true
+            intervalEt.setText("60"); wifiSw.isChecked = true; transfersEt.setText("4")
         }
         updateTimeBtn()
         showTrigger(trigGroup.checkedButtonId == R.id.tInterval)
@@ -134,6 +137,7 @@ class JobEditActivity : AppCompatActivity() {
             hour = hour, minute = minute, days = days,
             wifiOnly = wifiSw.isChecked, chargingOnly = chargeSw.isChecked,
             exclude = excludeEt.text.toString().trim(), include = includeEt.text.toString().trim(),
+            transfers = (transfersEt.text.toString().toIntOrNull() ?: 4).coerceIn(1, 8),
             enabled = editing?.enabled ?: true,
             lastRun = editing?.lastRun ?: 0, lastStatus = editing?.lastStatus ?: ""
         )

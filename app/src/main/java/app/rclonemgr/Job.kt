@@ -25,6 +25,7 @@ class Job(
     val chargingOnly: Boolean,
     val exclude: String = "",   // one pattern per line
     val include: String = "",   // one pattern per line (optional)
+    val transfers: Int = 4,     // parallel transfers, 1..8
     var enabled: Boolean = true,
     var lastRun: Long = 0,
     var lastStatus: String = ""
@@ -45,7 +46,7 @@ class Job(
         .put("trigger", trigger).put("intervalMin", intervalMin)
         .put("hour", hour).put("minute", minute).put("days", days)
         .put("wifiOnly", wifiOnly).put("chargingOnly", chargingOnly)
-        .put("exclude", exclude).put("include", include)
+        .put("exclude", exclude).put("include", include).put("transfers", transfers)
         .put("enabled", enabled).put("lastRun", lastRun).put("lastStatus", lastStatus)
 
     companion object {
@@ -57,6 +58,7 @@ class Job(
             minute = o.optInt("minute"), days = o.optInt("days", 0x7F),
             wifiOnly = o.optBoolean("wifiOnly", true), chargingOnly = o.optBoolean("chargingOnly"),
             exclude = o.optString("exclude"), include = o.optString("include"),
+            transfers = o.optInt("transfers", 4).coerceIn(1, 8),
             enabled = o.optBoolean("enabled", true), lastRun = o.optLong("lastRun"),
             lastStatus = o.optString("lastStatus")
         )
