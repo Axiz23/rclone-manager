@@ -1,10 +1,13 @@
 package app.rclonemgr
 
 import android.app.Activity
+import android.content.res.Configuration
+import android.graphics.Color
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.view.View
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 /** true saat UI terlihat. Dipakai service untuk memutuskan apakah proses boleh dimatikan setelah backup selesai. */
@@ -22,6 +25,17 @@ object Paths {
         val base = if (parts[0] == "primary") "/storage/emulated/0" else "/storage/${parts[0]}"
         return if (rel.isEmpty()) base else "$base/$rel"
     }
+}
+
+/** Edge-to-edge on every Android version (Android < 15 does not enforce it), transparent system bars. */
+fun Activity.edgeToEdge() {
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    window.statusBarColor = Color.TRANSPARENT
+    window.navigationBarColor = Color.TRANSPARENT
+    val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    val c = WindowCompat.getInsetsController(window, window.decorView)
+    c.isAppearanceLightStatusBars = !night
+    c.isAppearanceLightNavigationBars = !night
 }
 
 /** The app bar draws under the status bar (same color); other insets pad the root. */

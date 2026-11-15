@@ -54,6 +54,7 @@ class JobEditActivity : AppCompatActivity() {
     override fun onCreate(b: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
+        edgeToEdge()
         setContentView(R.layout.activity_job_edit)
         applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
 

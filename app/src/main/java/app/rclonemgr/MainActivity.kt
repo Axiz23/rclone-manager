@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(b: Bundle?) {
         DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
+        edgeToEdge()
         setContentView(R.layout.activity_main)
         applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
         list = findViewById(R.id.list)
