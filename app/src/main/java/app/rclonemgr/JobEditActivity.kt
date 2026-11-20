@@ -21,7 +21,7 @@ import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
 import java.util.UUID
 
-class JobEditActivity : AppCompatActivity() {
+class JobEditActivity : BaseActivity() {
     private var editing: Job? = null
     private var hour = 2
     private var minute = 0
@@ -52,9 +52,7 @@ class JobEditActivity : AppCompatActivity() {
     }
 
     override fun onCreate(b: Bundle?) {
-        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
-        edgeToEdge()
         setContentView(R.layout.activity_job_edit)
         applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
 

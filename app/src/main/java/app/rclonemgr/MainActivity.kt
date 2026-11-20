@@ -14,57 +14,90 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.color.DynamicColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.navigation.NavigationView
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : BaseActivity() {
+    private lateinit var drawer: DrawerLayout
+    private lateinit var nav: NavigationView
+    private lateinit var tb: MaterialToolbar
+    private lateinit var pageRemotes: View
+    private lateinit var pageJobs: View
+    private lateinit var remotesList: LinearLayout
+    private lateinit var remotesEmpty: TextView
+    private lateinit var fab: View
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
-    private lateinit var info: TextView
     private lateinit var permCard: View
     private lateinit var permText: TextView
     private lateinit var permBtn: Button
+    private var page = 0   // 0 = Remotes (default), 1 = Jobs
 
     private val pickConf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::importConf) }
     private val reqNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refresh() }
 
     override fun onCreate(b: Bundle?) {
-        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(b)
-        edgeToEdge()
         setContentView(R.layout.activity_main)
         applyInsets(findViewById(R.id.root), findViewById(R.id.appbar))
-        list = findViewById(R.id.list)
-        empty = findViewById(R.id.empty)
-        info = findViewById(R.id.info)
-        permCard = findViewById(R.id.permCard)
-        permText = findViewById(R.id.permText)
-        permBtn = findViewById(R.id.permBtn)
+        drawer = findViewById(R.id.drawer); nav = findViewById(R.id.nav); tb = findViewById(R.id.toolbar)
+        pageRemotes = findViewById(R.id.pageRemotes); pageJobs = findViewById(R.id.pageJobs)
+        remotesList = findViewById(R.id.remotesList); remotesEmpty = findViewById(R.id.remotesEmpty)
+        fab = findViewById(R.id.fab)
+        list = findViewById(R.id.list); empty = findViewById(R.id.empty)
+        permCard = findViewById(R.id.permCard); permText = findViewById(R.id.permText); permBtn = findViewById(R.id.permBtn)
 
-        val tb = findViewById<MaterialToolbar>(R.id.toolbar)
+        tb.setNavigationOnClickListener { drawer.openDrawer(GravityCompat.START) }
         tb.inflateMenu(R.menu.main)
         tb.setOnMenuItemClickListener {
             if (it.itemId == R.id.action_import) { pickConf.launch(arrayOf("*/*")); true } else false
         }
-        findViewById<View>(R.id.fab).setOnClickListener {
-            startActivity(Intent(this, JobEditActivity::class.java))
+        nav.setNavigationItemSelectedListener {
+            drawer.closeDrawer(GravityCompat.START)
+            when (it.itemId) {
+                R.id.nav_remotes -> { showPage(0); true }
+                R.id.nav_jobs -> { showPage(1); true }
+                R.id.nav_settings -> { showSettings(); false }
+                else -> false
+            }
         }
+        fab.setOnClickListener { startActivity(Intent(this, JobEditActivity::class.java)) }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (drawer.isDrawerOpen(GravityCompat.START)) drawer.closeDrawer(GravityCompat.START)
+                else if (page != 0) showPage(0)
+                else finish()
+            }
+        })
+        showPage(b?.getInt("page") ?: 0)
     }
 
-    override fun onStart() { super.onStart(); Ui.visible = true; refresh() }
-    override fun onStop() { super.onStop(); Ui.visible = false }
+    override fun onSaveInstanceState(o: Bundle) { super.onSaveInstanceState(o); o.putInt("page", page) }
+
+    override fun onStart() { super.onStart(); refresh() }
+
+    private fun showPage(p: Int) {
+        page = p
+        pageRemotes.visibility = if (p == 0) View.VISIBLE else View.GONE
+        pageJobs.visibility = if (p == 1) View.VISIBLE else View.GONE
+        fab.visibility = if (p == 1) View.VISIBLE else View.GONE
+        tb.title = if (p == 0) "Remotes" else "Jobs"
+        nav.setCheckedItem(if (p == 0) R.id.nav_remotes else R.id.nav_jobs)
+    }
 
     private fun pkgUri() = Uri.parse("package:$packageName")
 
     private fun refresh() {
-        // ---- izin yang masih kurang
+        // ---- missing permissions
         val need = ArrayList<Pair<String, () -> Unit>>()
         if (!Environment.isExternalStorageManager())
             need += "All files access — needed to read source folders." to {
@@ -87,12 +120,21 @@ class MainActivity : AppCompatActivity() {
             permBtn.setOnClickListener { need[0].second() }
         }
 
-        // ---- info remote
-        val remotes = RcloneRunner.remotes(this)
-        info.text = if (remotes.isEmpty()) "No rclone.conf yet. Import it from the ⋮ menu."
-        else "Remotes: " + remotes.joinToString(", ")
+        // ---- remotes
+        remotesList.removeAllViews()
+        val remotes = RcloneRunner.remoteInfo(this)
+        remotesEmpty.visibility = if (remotes.isEmpty()) View.VISIBLE else View.GONE
+        for ((name, type) in remotes) {
+            val v = layoutInflater.inflate(R.layout.item_remote, remotesList, false)
+            v.findViewById<TextView>(R.id.name).text = name
+            v.findViewById<TextView>(R.id.type).text = if (type.isEmpty()) "remote" else type
+            v.setOnClickListener {
+                startActivity(Intent(this, BrowseActivity::class.java).putExtra("remote", name))
+            }
+            remotesList.addView(v)
+        }
 
-        // ---- daftar job
+        // ---- jobs
         list.removeAllViews()
         val jobs = JobStore.all(this)
         empty.visibility = if (jobs.isEmpty()) View.VISIBLE else View.GONE
@@ -128,6 +170,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun showSettings() {
+        val labels = arrayOf("Use .thumbnails folder when available", "Generate thumbnails from source", "Loop videos")
+        val st = booleanArrayOf(Prefs.useThumbFolder(this), Prefs.generateThumbs(this), Prefs.loop(this))
+        val mb = Thumbs.diskSize(this) / (1024 * 1024)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Settings")
+            .setMultiChoiceItems(labels, st) { _, i, c -> st[i] = c }
+            .setPositiveButton("Save") { _, _ ->
+                Prefs.setUseThumbFolder(this, st[0])
+                Prefs.setGenerateThumbs(this, st[1])
+                Prefs.setLoop(this, st[2])
+            }
+            .setNeutralButton("Clear thumbnail cache ($mb MB)") { _, _ -> Thumbs.clear(this); toast("Thumbnail cache cleared") }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showLog(j: Job) {
         val lines = JobLog.read(this, j.id)
         val text = if (lines.isEmpty()) "No log yet." else lines.joinToString("\n")
@@ -144,7 +203,7 @@ class MainActivity : AppCompatActivity() {
             val dst = RcloneRunner.confFile(this)
             val tmp = File(dst.path + ".tmp")
             contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
-            if (!tmp.renameTo(dst)) throw java.io.IOException("rename gagal")
+            if (!tmp.renameTo(dst)) throw java.io.IOException("rename failed")
             toast("${RcloneRunner.remotes(this).size} remote(s) found")
         } catch (e: Exception) {
             toast("Import failed: ${e.message}")

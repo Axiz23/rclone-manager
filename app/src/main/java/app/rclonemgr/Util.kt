@@ -10,9 +10,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
-/** true saat UI terlihat. Dipakai service untuk memutuskan apakah proses boleh dimatikan setelah backup selesai. */
+/** Counts started activities; used to decide whether the process may be killed after a backup finishes. */
 object Ui {
-    @Volatile var visible = false
+    private val n = java.util.concurrent.atomic.AtomicInteger()
+    val visible: Boolean get() = n.get() > 0
+    fun started() { n.incrementAndGet() }
+    fun stopped() { n.decrementAndGet() }
 }
 
 object Paths {

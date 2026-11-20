@@ -40,10 +40,28 @@ object RcloneRunner {
     fun binary(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "librclone.so")
     fun confFile(ctx: Context) = File(ctx.filesDir, "rclone.conf")
 
-    fun remotes(ctx: Context): List<String> {
+    fun remotes(ctx: Context): List<String> = remoteInfo(ctx).map { it.first }
+
+    /** (name, type) for every [section] of rclone.conf. */
+    fun remoteInfo(ctx: Context): List<Pair<String, String>> {
         val f = confFile(ctx)
         if (!f.exists()) return emptyList()
-        return Regex("^\\[(.+)]\\s*$", RegexOption.MULTILINE).findAll(f.readText()).map { it.groupValues[1] }.toList()
+        val out = ArrayList<Pair<String, String>>()
+        var name: String? = null
+        var type = ""
+        for (line in f.readLines()) {
+            val t = line.trim()
+            if (t.startsWith("[") && t.endsWith("]")) {
+                name?.let { out.add(it to type) }
+                name = t.substring(1, t.length - 1)
+                type = ""
+            } else if (t.startsWith("type")) {
+                val kv = t.split("=", limit = 2)
+                if (kv.size == 2 && kv[0].trim() == "type") type = kv[1].trim()
+            }
+        }
+        name?.let { out.add(it to type) }
+        return out
     }
 
     private fun patterns(s: String) =
