@@ -107,7 +107,7 @@ class BackupService : Service() {
     }
 
     private fun openApp() = PendingIntent.getActivity(
-        this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        this, 0, Intent(this, JobsActivity::class.java), PendingIntent.FLAG_IMMUTABLE
     )
 
     private fun buildRun(title: String, text: String): Notification {

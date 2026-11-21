@@ -5,9 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
+import android.media.ThumbnailUtils
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
+import android.util.Size
 import android.widget.ImageView
 import java.io.File
 import java.security.MessageDigest
@@ -17,13 +19,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Thumbnails: memory LRU -> disk cache (cacheDir/thumbs) -> source.
- * Source 1: matching file in the ".thumbnails" folder. Source 2: generated from the original file.
+ * Thumbnails: memory LRU -> disk cache (cacheDir/thumbs) -> ".thumbnails/<file name>.webp" next to the file
+ * -> generated from the original file. The first two steps run on a wide pool (tiny files), generation from a
+ * remote runs on a narrow pool (it downloads the original).
  */
 object Thumbs {
     private const val SIZE = 320
     private const val DISK_MAX = 100L * 1024 * 1024
     private const val MAX_IMAGE_BYTES = 30L * 1024 * 1024
+    private const val MAX_THUMB_BYTES = 2L * 1024 * 1024
 
     private val main = Handler(Looper.getMainLooper())
     private val writes = AtomicInteger()
@@ -32,54 +36,114 @@ object Thumbs {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
     }
 
-    // newest request first: what is currently on screen gets loaded before items scrolled past
-    private val queue = object : LinkedBlockingDeque<Runnable>() {
+    // newest request first: what is on screen is loaded before items that were scrolled past
+    private class Lifo : LinkedBlockingDeque<Runnable>() {
         override fun offer(e: Runnable): Boolean = offerFirst(e)
     }
-    private val pool = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, queue).apply { allowCoreThreadTimeOut(true) }
+    private val fastQ = Lifo()
+    private val slowQ = Lifo()
+    private val fast = ThreadPoolExecutor(4, 4, 20, TimeUnit.SECONDS, fastQ).apply { allowCoreThreadTimeOut(true) }
+    private val slow = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, slowQ).apply { allowCoreThreadTimeOut(true) }
 
     private fun dir(ctx: Context) = File(ctx.cacheDir, "thumbs").apply { mkdirs() }
 
     private fun md5(s: String) =
         MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    fun cancelAll() { queue.clear() }
+    fun cancelAll() { fastQ.clear(); slowQ.clear() }
 
-    fun load(view: ImageView, remote: String, dir: String, e: Entry) {
+    fun load(view: ImageView, loc: Loc, e: Entry, thumbDir: Boolean) {
         val ctx = view.context.applicationContext
-        val full = if (dir.isEmpty()) e.name else "$dir/${e.name}"
-        val k = md5("$remote:$full|${e.size}")
+        val k = md5("${loc.remote}:${loc.path}/${e.name}|${e.size}|${e.modified}")
         view.tag = k
         mem.get(k)?.let { show(view, it); return }
-        pool.execute {
+        fast.execute {
             if (view.tag != k) return@execute
-            val bmp = fromDisk(ctx, k) ?: produce(ctx, remote, dir, e)?.also { toDisk(ctx, k, it) }
-            if (bmp != null) {
-                mem.put(k, bmp)
-                main.post { if (view.tag == k) show(view, bmp) }
+            var bmp = fromDisk(ctx, k)
+            if (bmp == null && thumbDir && Prefs.useThumbFolder(ctx)) bmp = fromThumbFolder(ctx, loc, e, k)
+            if (bmp == null && Prefs.generateThumbs(ctx)) {
+                if (loc.remote == null) {
+                    bmp = genLocal(File(loc.path, e.name), e)
+                    if (bmp != null) toDisk(ctx, k, bmp)
+                } else {
+                    slow.execute {
+                        if (view.tag != k) return@execute
+                        val b = genRemote(ctx, loc, e)
+                        if (b != null) { toDisk(ctx, k, b); deliver(view, k, b) }
+                    }
+                    return@execute
+                }
             }
+            if (bmp != null) deliver(view, k, bmp)
         }
     }
 
+    private fun deliver(view: ImageView, k: String, b: Bitmap) {
+        mem.put(k, b)
+        main.post { if (view.tag == k) show(view, b) }
+    }
+
     private fun show(v: ImageView, b: Bitmap) {
+        v.imageTintList = null
         v.setPadding(0, 0, 0, 0)
         v.scaleType = ImageView.ScaleType.CENTER_CROP
         v.setImageBitmap(b)
     }
 
-    private fun produce(ctx: Context, remote: String, dir: String, e: Entry): Bitmap? = try {
-        var bmp: Bitmap? = null
-        val t = e.thumbName
-        if (t != null) {
-            val td = if (dir.isEmpty()) ".thumbnails" else "$dir/.thumbnails"
-            bmp = downloadDecode(ctx, Rc.fileUrl(remote, td, t))
+    /** `.thumbnails/<file name>.webp` in the same directory as the file. */
+    private fun fromThumbFolder(ctx: Context, loc: Loc, e: Entry, k: String): Bitmap? = try {
+        val name = e.name + ".webp"
+        val bytes: ByteArray? = if (loc.remote == null) {
+            val f = File(File(loc.path, ".thumbnails"), name)
+            if (f.isFile && f.length() in 1L..MAX_THUMB_BYTES) f.readBytes() else null
+        } else {
+            val d = if (loc.path.isEmpty()) ".thumbnails" else "${loc.path}/.thumbnails"
+            Rc.readBytes(Rc.fileUrl(loc.remote, d, name), MAX_THUMB_BYTES)
         }
-        if (bmp == null && Prefs.generateThumbs(ctx)) {
-            val url = Rc.fileUrl(remote, dir, e.name)
-            bmp = if (e.kind == Entry.K_VIDEO) videoThumb(url)
-            else if (e.size in 0..MAX_IMAGE_BYTES) downloadDecode(ctx, url) else null
+        if (bytes == null) null else {
+            File(dir(ctx), "$k.webp").writeBytes(bytes)   // keep the raw bytes in the cache, no re-encoding
+            decodeBytes(bytes)
         }
-        bmp
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun decodeBytes(b: ByteArray): Bitmap? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(b, 0, b.size, o)
+        var s = 1
+        while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= SIZE) s *= 2
+        return BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = s })
+    }
+
+    private fun genLocal(f: File, e: Entry): Bitmap? = try {
+        if (e.kind == Entry.K_VIDEO) ThumbnailUtils.createVideoThumbnail(f, Size(SIZE, SIZE), null)
+        else decodeFile(f)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun genRemote(ctx: Context, loc: Loc, e: Entry): Bitmap? = try {
+        val url = Rc.fileUrl(loc.remote!!, loc.path, e.name)
+        if (e.kind == Entry.K_VIDEO) videoThumb(url)
+        else if (e.size in 0L..MAX_IMAGE_BYTES) downloadDecode(ctx, url)
+        else null
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun decodeFile(f: File): Bitmap? = try {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(f)) { dec, info, _ ->
+            val m = maxOf(info.size.width, info.size.height)
+            if (m > SIZE) {
+                val s = SIZE.toFloat() / m
+                dec.setTargetSize(
+                    (info.size.width * s).toInt().coerceAtLeast(1),
+                    (info.size.height * s).toInt().coerceAtLeast(1)
+                )
+            }
+            dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        }
     } catch (_: Exception) {
         null
     }
@@ -93,17 +157,7 @@ object Thumbs {
             } finally {
                 c.disconnect()
             }
-            return ImageDecoder.decodeBitmap(ImageDecoder.createSource(tmp)) { dec, info, _ ->
-                val m = maxOf(info.size.width, info.size.height)
-                if (m > SIZE) {
-                    val s = SIZE.toFloat() / m
-                    dec.setTargetSize(
-                        (info.size.width * s).toInt().coerceAtLeast(1),
-                        (info.size.height * s).toInt().coerceAtLeast(1)
-                    )
-                }
-                dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            }
+            return decodeFile(tmp)
         } finally {
             tmp.delete()
         }

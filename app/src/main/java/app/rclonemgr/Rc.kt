@@ -8,6 +8,7 @@ import android.util.Base64
 import android.util.JsonReader
 import android.util.JsonToken
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -17,35 +18,11 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.URL
 import java.security.SecureRandom
-
-class Entry(val name: String, val size: Long, val isDir: Boolean) {
-    val ext: String = name.substringAfterLast('.', "").lowercase()
-    val kind: Int = when {
-        isDir -> K_DIR
-        ext in IMG -> K_IMAGE
-        ext in VID -> K_VIDEO
-        else -> K_FILE
-    }
-    var thumbName: String? = null   // matching file inside the .thumbnails folder
-
-    companion object {
-        const val K_DIR = 0
-        const val K_IMAGE = 1
-        const val K_VIDEO = 2
-        const val K_FILE = 3
-        private val IMG = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif")
-        private val VID = setOf("mp4", "m4v", "mov", "mkv", "webm", "3gp", "avi")
-    }
-}
-
-/** Names of the images in the folder being browsed (small, avoids huge Intents). */
-object MediaHolder {
-    @Volatile var names: List<String> = emptyList()
-}
+import java.time.OffsetDateTime
 
 /**
- * One local `rclone rcd` process (127.0.0.1, random port, random password) used for listing and for
- * streaming files. It only runs while a browse/viewer screen is in use.
+ * One local `rclone rcd` process (127.0.0.1, random port, random password) used for listing, file operations
+ * and streaming. It only runs while a screen needs it.
  */
 object RcServer {
     private var proc: Process? = null
@@ -54,7 +31,7 @@ object RcServer {
     @Volatile var port = 0
     @Volatile var auth = ""
     @Volatile private var ready = false
-    @Volatile var pins = 0   // > 0 while a player needs the server to stay alive
+    @Volatile var pins = 0   // > 0 while a player / long operation needs the server to stay alive
 
     @Synchronized fun acquire(ctx: Context) { refs++; ensureRunning(ctx) }
 
@@ -134,9 +111,29 @@ object Rc {
         "http://127.0.0.1:${RcServer.port}/" + Uri.encode("[$remote:$dir]", "/:") + "/" + Uri.encode(name)
 
     private fun errorText(c: HttpURLConnection): String {
-        val raw = try { c.errorStream?.bufferedReader()?.readText()?.take(2000) ?: "" } catch (_: Exception) { "" }
+        val raw = try { c.errorStream?.bufferedReader()?.use { it.readText() }?.take(2000) ?: "" } catch (_: Exception) { "" }
         val msg = try { JSONObject(raw).optString("error", raw) } catch (_: Exception) { raw }
         return "HTTP ${c.responseCode}: ${msg.ifBlank { "error" }}".take(240)
+    }
+
+    private fun parseTime(s: String): Long =
+        try { OffsetDateTime.parse(s).toInstant().toEpochMilli() } catch (_: Exception) { 0L }
+
+    /** Generic rc call (small JSON in / out). */
+    fun post(path: String, p: JSONObject, readTimeoutMs: Int = 30000): JSONObject {
+        if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
+        val c = open("http://127.0.0.1:${RcServer.port}/$path", "POST")
+        try {
+            c.readTimeout = readTimeoutMs
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", "application/json")
+            c.outputStream.use { it.write(p.toString().toByteArray()) }
+            if (c.responseCode != 200) throw IOException(errorText(c))
+            val txt = c.inputStream.bufferedReader().use { it.readText() }
+            return if (txt.isBlank()) JSONObject() else JSONObject(txt)
+        } finally {
+            c.disconnect()
+        }
     }
 
     /** Lists one directory. `dir` is relative to the remote root ("" = root). */
@@ -144,10 +141,11 @@ object Rc {
         if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
         val c = open("http://127.0.0.1:${RcServer.port}/operations/list", "POST")
         try {
+            c.readTimeout = 120000
             c.doOutput = true
             c.setRequestProperty("Content-Type", "application/json")
             val body = JSONObject().put("fs", "$remote:").put("remote", dir)
-                .put("opt", JSONObject().put("noModTime", true).put("noMimeType", true)).toString()
+                .put("opt", JSONObject().put("noMimeType", true)).toString()
             c.outputStream.use { it.write(body.toByteArray()) }
             if (c.responseCode != 200) throw IOException(errorText(c))
             val out = ArrayList<Entry>()
@@ -169,7 +167,7 @@ object Rc {
     }
 
     private fun readEntry(r: JsonReader): Entry {
-        var name = ""; var size = 0L; var dir = false
+        var name = ""; var size = 0L; var dir = false; var mod = 0L
         r.beginObject()
         while (r.hasNext()) {
             val n = r.nextName()
@@ -178,18 +176,38 @@ object Rc {
                 "Name" -> name = r.nextString()
                 "Size" -> size = r.nextLong()
                 "IsDir" -> dir = r.nextBoolean()
+                "ModTime" -> mod = parseTime(r.nextString())
                 else -> r.skipValue()
             }
         }
         r.endObject()
-        return Entry(name, size, dir)
+        return Entry(name, if (dir) 0L else maxOf(size, 0L), dir, mod)
     }
 
-    /** Opens a file for reading (supports seeking via Range on the server side). */
+    /** Opens a file for reading (the server supports Range requests, so seeking works). */
     fun get(url: String): HttpURLConnection {
         if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
         val c = open(url)
-        if (c.responseCode !in 200..299) { val m = errorText(c); c.disconnect(); throw IOException(m) }
+        if (c.responseCode !in 200..299) throw IOException(errorText(c))
         return c
+    }
+
+    /** Reads a small file fully (connection is left alive for reuse). Returns null if larger than `max`. */
+    fun readBytes(url: String, max: Long): ByteArray? {
+        val c = get(url)
+        if (c.contentLengthLong > max) { c.disconnect(); return null }
+        val out = ByteArrayOutputStream()
+        c.inputStream.use { i ->
+            val buf = ByteArray(8192)
+            var total = 0L
+            while (true) {
+                val n = i.read(buf)
+                if (n <= 0) break
+                total += n
+                if (total > max) { c.disconnect(); return null }
+                out.write(buf, 0, n)
+            }
+        }
+        return out.toByteArray()
     }
 }

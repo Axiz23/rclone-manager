@@ -52,3 +52,5 @@ fun Activity.applyInsets(root: View, appBar: View) {
         WindowInsetsCompat.CONSUMED
     }
 }
+
+fun android.content.Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

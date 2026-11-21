@@ -5,15 +5,25 @@ import android.content.Context
 /** Global settings (shared by all screens). */
 object Prefs {
     private fun sp(c: Context) = c.applicationContext.getSharedPreferences("prefs", Context.MODE_PRIVATE)
-    private fun get(c: Context, k: String, d: Boolean) = sp(c).getBoolean(k, d)
-    private fun put(c: Context, k: String, v: Boolean) = sp(c).edit().putBoolean(k, v).apply()
+    private fun bool(c: Context, k: String, d: Boolean) = sp(c).getBoolean(k, d)
+    private fun putBool(c: Context, k: String, v: Boolean) = sp(c).edit().putBoolean(k, v).apply()
 
-    fun loop(c: Context) = get(c, "loop", true)
-    fun setLoop(c: Context, v: Boolean) = put(c, "loop", v)
-    fun grid(c: Context) = get(c, "grid", false)
-    fun setGrid(c: Context, v: Boolean) = put(c, "grid", v)
-    fun useThumbFolder(c: Context) = get(c, "thumbFolder", true)
-    fun setUseThumbFolder(c: Context, v: Boolean) = put(c, "thumbFolder", v)
-    fun generateThumbs(c: Context) = get(c, "generate", true)
-    fun setGenerateThumbs(c: Context, v: Boolean) = put(c, "generate", v)
+    fun loop(c: Context) = bool(c, "loop", true)
+    fun setLoop(c: Context, v: Boolean) = putBool(c, "loop", v)
+    fun grid(c: Context) = bool(c, "grid", false)
+    fun setGrid(c: Context, v: Boolean) = putBool(c, "grid", v)
+    fun useThumbFolder(c: Context) = bool(c, "thumbFolder", true)
+    fun setUseThumbFolder(c: Context, v: Boolean) = putBool(c, "thumbFolder", v)
+    fun generateThumbs(c: Context) = bool(c, "generate", true)
+    fun setGenerateThumbs(c: Context, v: Boolean) = putBool(c, "generate", v)
+    fun showHidden(c: Context) = bool(c, "hidden", false)
+    fun setShowHidden(c: Context, v: Boolean) = putBool(c, "hidden", v)
+    fun sortAsc(c: Context) = bool(c, "sortAsc", true)
+    fun setSortAsc(c: Context, v: Boolean) = putBool(c, "sortAsc", v)
+    fun dirsFirst(c: Context) = bool(c, "dirsFirst", true)
+    fun setDirsFirst(c: Context, v: Boolean) = putBool(c, "dirsFirst", v)
+
+    /** 0 = name, 1 = type, 2 = size, 3 = last modified */
+    fun sortBy(c: Context) = sp(c).getInt("sortBy", 0)
+    fun setSortBy(c: Context, v: Int) = sp(c).edit().putInt("sortBy", v).apply()
 }

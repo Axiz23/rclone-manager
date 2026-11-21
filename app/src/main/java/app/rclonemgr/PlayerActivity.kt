@@ -10,6 +10,7 @@ import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
 import com.google.android.material.appbar.MaterialToolbar
+import java.io.File
 
 class PlayerActivity : BaseActivity() {
     private lateinit var vv: VideoView
@@ -27,8 +28,8 @@ class PlayerActivity : BaseActivity() {
         val dir = intent.getStringExtra("dir") ?: ""
         val name = intent.getStringExtra("name")
         if (remote == null || name == null) { finish(); return }
-        RcServer.pins++
-        RcServer.acquire(this); acquired = true
+        val local = remote.isEmpty()
+        if (!local) { RcServer.pins++; RcServer.acquire(this); acquired = true }
 
         vv = findViewById(R.id.vv); progress = findViewById(R.id.progress)
         val tb = findViewById<MaterialToolbar>(R.id.toolbar)
@@ -63,18 +64,23 @@ class PlayerActivity : BaseActivity() {
             Toast.makeText(this, "Cannot play this video", Toast.LENGTH_SHORT).show()
             true
         }
-        Thread {
-            val ok = RcServer.awaitReady()
-            runOnUiThread {
-                if (isDestroyed) return@runOnUiThread
-                if (ok) vv.setVideoURI(
-                    Uri.parse(Rc.fileUrl(remote, dir, name)), mapOf("Authorization" to RcServer.auth)
-                ) else {
-                    progress.visibility = View.GONE
-                    Toast.makeText(this, "rclone server did not start", Toast.LENGTH_SHORT).show()
+
+        if (local) {
+            vv.setVideoPath(File(dir, name).path)
+        } else {
+            Thread {
+                val ok = RcServer.awaitReady()
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    if (ok) vv.setVideoURI(
+                        Uri.parse(Rc.fileUrl(remote, dir, name)), mapOf("Authorization" to RcServer.auth)
+                    ) else {
+                        progress.visibility = View.GONE
+                        Toast.makeText(this, "rclone server did not start", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            }
-        }.start()
+            }.start()
+        }
     }
 
     override fun onPause() {

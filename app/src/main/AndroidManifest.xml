@@ -22,7 +22,8 @@
         android:theme="@style/Theme.RcloneMgr">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".FilesActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -31,14 +32,13 @@
         </activity>
 
         <activity
+            android:name=".JobsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".JobEditActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
-
-        <activity
-            android:name=".BrowseActivity"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:exported="false" />
 
         <activity
             android:name=".ImageActivity"

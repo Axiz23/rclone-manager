@@ -19,7 +19,9 @@ class ImageActivity : BaseActivity() {
     private lateinit var tb: MaterialToolbar
     private var remote = ""
     private var dir = ""
+    private var local = false
     private var names: List<String> = emptyList()
+    private var index = 0
     private var token = 0
     private var acquired = false
     @Volatile private var conn: HttpURLConnection? = null
@@ -31,11 +33,12 @@ class ImageActivity : BaseActivity() {
         setContentView(R.layout.activity_image)
         applyInsets(findViewById(R.id.root), findViewById(R.id.bar))
         remote = intent.getStringExtra("remote") ?: run { finish(); return }
+        local = remote.isEmpty()
         dir = intent.getStringExtra("dir") ?: ""
         names = MediaHolder.names
         val start = intent.getIntExtra("index", 0)
         if (names.isEmpty() || start !in names.indices) { finish(); return }
-        RcServer.acquire(this); acquired = true
+        if (!local) { RcServer.acquire(this); acquired = true }
 
         iv = findViewById(R.id.iv); progress = findViewById(R.id.progress); tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE); tb.setSubtitleTextColor(Color.LTGRAY)
@@ -47,8 +50,6 @@ class ImageActivity : BaseActivity() {
         }
         show(start)
     }
-
-    private var index = 0
 
     private fun show(i: Int) {
         index = i
@@ -70,8 +71,21 @@ class ImageActivity : BaseActivity() {
         }
     }
 
-    /** Download to a temp file, then decode down-sampled (max 2048 px) to keep memory low. */
+    private fun decode(f: File): Bitmap =
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(f)) { dec, info, _ ->
+            val m = maxOf(info.size.width, info.size.height)
+            if (m > 2048) {
+                val s = 2048f / m
+                dec.setTargetSize(
+                    (info.size.width * s).toInt().coerceAtLeast(1),
+                    (info.size.height * s).toInt().coerceAtLeast(1)
+                )
+            }
+        }
+
+    /** Local: decode directly. Remote: download to a temp file first. Always down-sampled (max 2048 px). */
     private fun fetch(name: String): Bitmap? {
+        if (local) return decode(File(dir, name))
         val tmp = File.createTempFile("view", ".tmp", cacheDir)
         try {
             val c = Rc.get(Rc.fileUrl(remote, dir, name))
@@ -81,16 +95,7 @@ class ImageActivity : BaseActivity() {
             } finally {
                 c.disconnect()
             }
-            return ImageDecoder.decodeBitmap(ImageDecoder.createSource(tmp)) { dec, info, _ ->
-                val m = maxOf(info.size.width, info.size.height)
-                if (m > 2048) {
-                    val s = 2048f / m
-                    dec.setTargetSize(
-                        (info.size.width * s).toInt().coerceAtLeast(1),
-                        (info.size.height * s).toInt().coerceAtLeast(1)
-                    )
-                }
-            }
+            return decode(tmp)
         } finally {
             tmp.delete()
         }
