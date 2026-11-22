@@ -203,7 +203,7 @@ object Thumbs {
      * keep downloading, then decode down-sampled.
      */
     private fun downloadDecode(ctx: Context, url: String, wantPreview: Boolean, onPreview: (Bitmap) -> Unit): Bitmap? {
-        val tmp = File.createTempFile("th", ".tmp", ctx.cacheDir)
+        val tmp = File.createTempFile("thumb", ".tmp", ctx.cacheDir)
         try {
             val c = Rc.get(url, GEN_TIMEOUT_MS)
             try {
@@ -237,6 +237,14 @@ object Thumbs {
 
     /** Video frame through the local HTTP server (only the needed byte ranges are fetched). */
     private fun videoThumb(url: String): Bitmap? {
+        var last: Exception? = null
+        for (attempt in 0..1) {   // the first attempt often only warms the remote up
+            try { return videoThumbOnce(url) } catch (ex: Exception) { last = ex }
+        }
+        throw last ?: IOException("video thumbnail failed")
+    }
+
+    private fun videoThumbOnce(url: String): Bitmap? {
         if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
         val r = MediaMetadataRetriever()
         try {

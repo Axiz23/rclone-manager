@@ -53,7 +53,7 @@ class ImageActivity : BaseActivity() {
         super.onCreate(b)
         setContentView(R.layout.activity_image)
         bar = findViewById(R.id.bar)
-        applyInsets(findViewById(R.id.root), bar)
+        applyOverlayInsets(findViewById(R.id.root), bar, null)
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false
         remote = intent.getStringExtra("remote") ?: run { finish(); return }
         local = remote.isEmpty()

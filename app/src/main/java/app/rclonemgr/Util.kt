@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.view.View
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -49,6 +50,22 @@ fun Activity.applyInsets(root: View, appBar: View) {
         )
         appBar.setPadding(0, b.top, 0, 0)
         v.setPadding(b.left, 0, b.right, b.bottom)
+        WindowInsetsCompat.CONSUMED
+    }
+}
+
+/**
+ * For full-screen viewers: the content (video / image) is NOT padded, so it never moves when the system bars
+ * are hidden or shown. Only the overlays get padding, from the stable (always-visible) insets.
+ */
+fun Activity.applyOverlayInsets(root: View, top: View, bottom: View?) {
+    ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+        val b = Insets.max(
+            insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars()),
+            insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+        )
+        top.setPadding(b.left, b.top, b.right, 0)
+        bottom?.setPadding(dp(16) + b.left, dp(24), dp(16) + b.right, dp(8) + b.bottom)
         WindowInsetsCompat.CONSUMED
     }
 }

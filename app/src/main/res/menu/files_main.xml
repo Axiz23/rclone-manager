@@ -10,24 +10,7 @@
         android:id="@+id/action_sort"
         android:icon="@drawable/ic_sort"
         android:title="View and sort"
-        app:showAsAction="always">
-        <menu>
-            <group android:id="@+id/group_view" android:checkableBehavior="single">
-                <item android:id="@+id/action_view_list" android:title="List" />
-                <item android:id="@+id/action_view_grid" android:title="Grid" />
-            </group>
-            <group android:id="@+id/group_sort" android:checkableBehavior="single">
-                <item android:id="@+id/action_sort_name" android:title="Sort by name" />
-                <item android:id="@+id/action_sort_type" android:title="Sort by type" />
-                <item android:id="@+id/action_sort_size" android:title="Sort by size" />
-                <item android:id="@+id/action_sort_modified" android:title="Sort by last modified" />
-            </group>
-            <group android:id="@+id/group_opts">
-                <item android:id="@+id/action_sort_asc" android:checkable="true" android:title="Ascending" />
-                <item android:id="@+id/action_sort_dirs" android:checkable="true" android:title="Folders first" />
-            </group>
-        </menu>
-    </item>
+        app:showAsAction="always" />
     <item android:id="@+id/action_refresh" android:title="Refresh" app:showAsAction="never" />
     <item android:id="@+id/action_show_hidden" android:checkable="true" android:title="Show hidden files" app:showAsAction="never" />
     <item android:id="@+id/action_copy_path" android:title="Copy path" app:showAsAction="never" />

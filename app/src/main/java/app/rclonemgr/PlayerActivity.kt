@@ -68,7 +68,7 @@ class PlayerActivity : BaseActivity() {
         super.onCreate(b)
         setContentView(R.layout.activity_player)
         root = findViewById(R.id.root); bar = findViewById(R.id.bar); controls = findViewById(R.id.controls)
-        applyInsets(root, bar)
+        applyOverlayInsets(root, bar, controls)
         WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = false
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 

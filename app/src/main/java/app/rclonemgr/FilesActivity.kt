@@ -12,7 +12,14 @@ import android.os.Looper
 import android.os.storage.StorageManager
 import android.provider.Settings
 import android.text.format.Formatter
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
 import android.view.MenuItem
+import android.view.ViewGroup
+import android.widget.CompoundButton
+import android.widget.PopupWindow
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.divider.MaterialDivider
 import android.view.View
 import android.widget.Button
 import android.widget.HorizontalScrollView
@@ -293,17 +300,7 @@ class FilesActivity : BaseActivity() {
     }
 
     private fun syncMenu() {
-        val m = tb.menu
-        m.findItem(R.id.action_view_list)?.isChecked = !Prefs.grid(this)
-        m.findItem(R.id.action_view_grid)?.isChecked = Prefs.grid(this)
-        val sb = Prefs.sortBy(this)
-        m.findItem(R.id.action_sort_name)?.isChecked = sb == 0
-        m.findItem(R.id.action_sort_type)?.isChecked = sb == 1
-        m.findItem(R.id.action_sort_size)?.isChecked = sb == 2
-        m.findItem(R.id.action_sort_modified)?.isChecked = sb == 3
-        m.findItem(R.id.action_sort_asc)?.isChecked = Prefs.sortAsc(this)
-        m.findItem(R.id.action_sort_dirs)?.isChecked = Prefs.dirsFirst(this)
-        m.findItem(R.id.action_show_hidden)?.isChecked = Prefs.showHidden(this)
+        tb.menu.findItem(R.id.action_show_hidden)?.isChecked = Prefs.showHidden(this)
     }
 
     private fun updateTitle() {
@@ -313,14 +310,7 @@ class FilesActivity : BaseActivity() {
 
     private fun onMenu(id: Int): Boolean {
         when (id) {
-            R.id.action_view_list -> { Prefs.setGrid(this, false); applyMode() }
-            R.id.action_view_grid -> { Prefs.setGrid(this, true); applyMode() }
-            R.id.action_sort_name -> sortBy(0)
-            R.id.action_sort_type -> sortBy(1)
-            R.id.action_sort_size -> sortBy(2)
-            R.id.action_sort_modified -> sortBy(3)
-            R.id.action_sort_asc -> { Prefs.setSortAsc(this, !Prefs.sortAsc(this)); applyFilter() }
-            R.id.action_sort_dirs -> { Prefs.setDirsFirst(this, !Prefs.dirsFirst(this)); applyFilter() }
+            R.id.action_sort -> showViewSortPopup()
             R.id.action_show_hidden -> { Prefs.setShowHidden(this, !Prefs.showHidden(this)); applyFilter() }
             R.id.action_refresh -> load()
             R.id.action_copy_path -> copyPath()
@@ -332,6 +322,44 @@ class FilesActivity : BaseActivity() {
     }
 
     private fun sortBy(mode: Int) { Prefs.setSortBy(this, mode); applyFilter() }
+
+    /** "View and sort" popup: every row has the same layout, so radio buttons and check boxes line up. */
+    private fun showViewSortPopup() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        val pw = PopupWindow(box, dp(260), ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        pw.elevation = dp(8).toFloat()
+        pw.setBackgroundDrawable(GradientDrawable().apply {
+            setColor(MaterialColors.getColor(tb, com.google.android.material.R.attr.colorSurfaceContainer))
+            cornerRadius = dp(12).toFloat()
+        })
+        fun row(label: String, radio: Boolean, checked: Boolean, onClick: () -> Unit) {
+            val v = layoutInflater.inflate(if (radio) R.layout.row_radio else R.layout.row_check, box, false)
+            v.findViewById<TextView>(R.id.label).text = label
+            v.findViewById<CompoundButton>(R.id.ctl).isChecked = checked
+            v.setOnClickListener { pw.dismiss(); onClick() }
+            box.addView(v)
+        }
+        fun divider() {
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.topMargin = dp(4); lp.bottomMargin = dp(4)
+            box.addView(MaterialDivider(this), lp)
+        }
+        val grid = Prefs.grid(this)
+        row("List", true, !grid) { Prefs.setGrid(this, false); applyMode() }
+        row("Grid", true, grid) { Prefs.setGrid(this, true); applyMode() }
+        divider()
+        val cur = Prefs.sortBy(this)
+        listOf("Sort by name", "Sort by type", "Sort by size", "Sort by last modified").forEachIndexed { i, t ->
+            row(t, true, cur == i) { sortBy(i) }
+        }
+        divider()
+        row("Ascending", false, Prefs.sortAsc(this)) { Prefs.setSortAsc(this, !Prefs.sortAsc(this)); applyFilter() }
+        row("Folders first", false, Prefs.dirsFirst(this)) { Prefs.setDirsFirst(this, !Prefs.dirsFirst(this)); applyFilter() }
+        pw.showAsDropDown(tb, -dp(8), 0, Gravity.END)
+    }
 
     private fun copyPath() {
         val text = if (loc.remote == null) loc.path else "${loc.remote}:${loc.path}"
