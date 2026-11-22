@@ -279,7 +279,7 @@ class PlayerActivity : BaseActivity() {
         val labels = speeds.map { if (it == 1f) "1x (normal)" else "${it}x" }.toTypedArray()
         MaterialAlertDialogBuilder(this)
             .setTitle("Playback speed")
-            .setSingleChoiceItems(labels, speeds.indexOf(speed).coerceAtLeast(0)) { d, i ->
+            .setSingleChoiceItems(labels, speeds.indexOfFirst { it == speed }.coerceAtLeast(0)) { d, i ->
                 speed = speeds[i]
                 player?.let { applySpeed(it) }
                 d.dismiss()
