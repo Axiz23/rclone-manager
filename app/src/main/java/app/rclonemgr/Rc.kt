@@ -116,7 +116,7 @@ object Rc {
         return "HTTP ${c.responseCode}: ${msg.ifBlank { "error" }}".take(240)
     }
 
-    private fun parseTime(s: String): Long =
+    fun parseTime(s: String): Long =
         try { OffsetDateTime.parse(s).toInstant().toEpochMilli() } catch (_: Exception) { 0L }
 
     /** Generic rc call (small JSON in / out). */
@@ -190,6 +190,28 @@ object Rc {
         val c = open(url)
         if (c.responseCode !in 200..299) throw IOException(errorText(c))
         return c
+    }
+
+    /** Reads the first `n` bytes of a file (Range request); never downloads the whole file. */
+    fun readHead(url: String, n: Int): ByteArray {
+        if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
+        val c = open(url)
+        c.setRequestProperty("Range", "bytes=0-${n - 1}")
+        try {
+            if (c.responseCode !in 200..299) throw IOException(errorText(c))
+            val buf = ByteArray(n)
+            var got = 0
+            c.inputStream.use { i ->
+                while (got < n) {
+                    val r = i.read(buf, got, n - got)
+                    if (r <= 0) break
+                    got += r
+                }
+            }
+            return buf.copyOf(got)
+        } finally {
+            c.disconnect()
+        }
     }
 
     /** Reads a small file fully (connection is left alive for reuse). Returns null if larger than `max`. */

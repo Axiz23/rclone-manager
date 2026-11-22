@@ -23,6 +23,15 @@ object Prefs {
     fun dirsFirst(c: Context) = bool(c, "dirsFirst", true)
     fun setDirsFirst(c: Context, v: Boolean) = putBool(c, "dirsFirst", v)
 
+    fun backupDest(c: Context): Loc? {
+        val s = sp(c).getString("backupDest", null) ?: return null
+        val i = s.indexOf('\u0001')
+        if (i < 0) return null
+        return Loc(s.substring(0, i).ifEmpty { null }, s.substring(i + 1))
+    }
+    fun setBackupDest(c: Context, l: Loc) =
+        sp(c).edit().putString("backupDest", (l.remote ?: "") + "\u0001" + l.path).apply()
+
     /** 0 = name, 1 = type, 2 = size, 3 = last modified */
     fun sortBy(c: Context) = sp(c).getInt("sortBy", 0)
     fun setSortBy(c: Context, v: Int) = sp(c).edit().putInt("sortBy", v).apply()

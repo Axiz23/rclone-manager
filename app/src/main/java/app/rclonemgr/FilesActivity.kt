@@ -68,6 +68,7 @@ class FilesActivity : BaseActivity() {
     private val ioOps = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private var searchItem: MenuItem? = null
+    private var pickMode = false
 
     private val pickConf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::importConf) }
 
@@ -85,6 +86,8 @@ class FilesActivity : BaseActivity() {
         swipe = findViewById(R.id.swipe); rv = findViewById(R.id.rv)
         stateBox = findViewById(R.id.stateBox); stateText = findViewById(R.id.stateText); grantBtn = findViewById(R.id.grantBtn)
         navList = findViewById(R.id.navList)
+        pickMode = intent.getBooleanExtra("pick", false)
+        if (pickMode) setupPickBar()
 
         adapter = FileAdapter({ loc }, { thumbDir }, { selected }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
         rv.adapter = adapter
@@ -112,6 +115,7 @@ class FilesActivity : BaseActivity() {
     override fun onStart() {
         super.onStart()
         buildNav()
+        if (MediaHolder.changed) { MediaHolder.changed = false; load() }
         if (permShown && Environment.isExternalStorageManager()) load()
     }
 
@@ -150,6 +154,7 @@ class FilesActivity : BaseActivity() {
         loc = l
         selected.clear()
         buildCrumbs()
+        updatePickBar()
         navAdapter.notifyDataSetChanged()
         load(true)
     }
@@ -202,13 +207,14 @@ class FilesActivity : BaseActivity() {
         items.add(NavItem(NavItem.HEADER, title = "Remotes"))
         for ((n, t) in RcloneRunner.remoteInfo(this))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, n, t.ifEmpty { null }, Loc(n, "")))
-        items.add(NavItem(NavItem.ITEM, R.drawable.ic_add, "Import rclone.conf", action = { pickConf.launch(arrayOf("*/*")) }))
-
-        items.add(NavItem(NavItem.DIVIDER))
-        items.add(NavItem(NavItem.ITEM, R.drawable.ic_schedule, "Backup jobs", action = {
-            startActivity(Intent(this, JobsActivity::class.java))
-        }))
-        items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings", action = { Dialogs.settings(this) }))
+        if (!pickMode) {
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_add, "Import rclone.conf", action = { pickConf.launch(arrayOf("*/*")) }))
+            items.add(NavItem(NavItem.DIVIDER))
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_schedule, "Backup jobs", action = {
+                startActivity(Intent(this, JobsActivity::class.java))
+            }))
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings", action = { Dialogs.settings(this) }))
+        }
         navAdapter.items = items
         navAdapter.notifyDataSetChanged()
     }
@@ -361,7 +367,7 @@ class FilesActivity : BaseActivity() {
         val hidden = Prefs.showHidden(this)
         val q = query.trim().lowercase()
         val l = entries
-            .filter { (hidden || !it.name.startsWith(".")) && (q.isEmpty() || it.name.lowercase().contains(q)) }
+            .filter { (hidden || !it.name.startsWith(".")) && (q.isEmpty() || it.name.lowercase().contains(q)) && (!pickMode || it.isDir) }
             .sortedWith(comparator())
         shown = l
         selected.retainAll(l.map { it.name }.toSet())
@@ -441,10 +447,13 @@ class FilesActivity : BaseActivity() {
                         .putExtra("remote", remote).putExtra("dir", loc.path).putExtra("index", names.indexOf(e.name))
                 )
             }
-            Entry.K_VIDEO -> startActivity(
-                Intent(this, PlayerActivity::class.java)
-                    .putExtra("remote", remote).putExtra("dir", loc.path).putExtra("name", e.name)
-            )
+            Entry.K_VIDEO -> {
+                MediaHolder.videos = shown.filter { it.kind == Entry.K_VIDEO }.map { it.name }
+                startActivity(
+                    Intent(this, PlayerActivity::class.java)
+                        .putExtra("remote", remote).putExtra("dir", loc.path).putExtra("name", e.name)
+                )
+            }
             else -> toast("No built-in viewer for this file type")
         }
     }
@@ -452,6 +461,25 @@ class FilesActivity : BaseActivity() {
     // stage2 hooks (selection mode and file operations are added in stage 2)
     private fun onItemLong(e: Entry) {}
     private fun showItemMenu(e: Entry, v: View) {}
+
+    // ---- folder picker mode (used by "Move to folder" / "Copy to folder" / "Back up now" in the viewers) ----
+    private fun setupPickBar() {
+        findViewById<View>(R.id.pasteBar).visibility = View.VISIBLE
+        findViewById<Button>(R.id.pasteBtn).apply {
+            text = "Select"
+            setOnClickListener {
+                setResult(RESULT_OK, Intent().putExtra("remote", loc.remote ?: "").putExtra("path", loc.path))
+                finish()
+            }
+        }
+        findViewById<Button>(R.id.pasteCancel).setOnClickListener { finish() }
+    }
+
+    private fun updatePickBar() {
+        if (!pickMode) return
+        findViewById<TextView>(R.id.pasteText).text =
+            "Select: " + (if (loc.remote == null) loc.path else "${loc.remote}:/${loc.path}")
+    }
 
     // ---- stage2 insert point ----
 

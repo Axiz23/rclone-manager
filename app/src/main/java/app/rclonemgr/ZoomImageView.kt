@@ -19,6 +19,7 @@ class ZoomImageView @JvmOverloads constructor(c: Context, a: AttributeSet? = nul
     private val vals = FloatArray(9)
     private var minScale = 1f
     var onSwipe: ((Int) -> Unit)? = null
+    var onTap: (() -> Unit)? = null
 
     private val sd = ScaleGestureDetector(c, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(d: ScaleGestureDetector): Boolean {
@@ -28,6 +29,10 @@ class ZoomImageView @JvmOverloads constructor(c: Context, a: AttributeSet? = nul
 
     private val gd = GestureDetector(c, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
+
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            onTap?.invoke(); return true
+        }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
             if (scale() > minScale * 1.05f) fit() else zoomBy(minScale * 3f / scale(), e.x, e.y)

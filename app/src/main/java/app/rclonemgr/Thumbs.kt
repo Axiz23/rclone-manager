@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.media.ThumbnailUtils
 import android.os.Handler
@@ -11,6 +13,7 @@ import android.os.Looper
 import android.util.LruCache
 import android.util.Size
 import android.widget.ImageView
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.LinkedBlockingDeque
@@ -41,16 +44,19 @@ object Thumbs {
         override fun offer(e: Runnable): Boolean = offerFirst(e)
     }
     private val fastQ = Lifo()
-    private val slowQ = Lifo()
+    private val imgQ = Lifo()
+    private val vidQ = Lifo()
     private val fast = ThreadPoolExecutor(4, 4, 20, TimeUnit.SECONDS, fastQ).apply { allowCoreThreadTimeOut(true) }
-    private val slow = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, slowQ).apply { allowCoreThreadTimeOut(true) }
+    // photos and videos have their own pools: a video frame can take minutes and must not block photos
+    private val slowImg = ThreadPoolExecutor(3, 3, 20, TimeUnit.SECONDS, imgQ).apply { allowCoreThreadTimeOut(true) }
+    private val slowVid = ThreadPoolExecutor(1, 1, 20, TimeUnit.SECONDS, vidQ).apply { allowCoreThreadTimeOut(true) }
 
     private fun dir(ctx: Context) = File(ctx.cacheDir, "thumbs").apply { mkdirs() }
 
     private fun md5(s: String) =
         MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    fun cancelAll() { fastQ.clear(); slowQ.clear() }
+    fun cancelAll() { fastQ.clear(); imgQ.clear(); vidQ.clear() }
 
     fun load(view: ImageView, loc: Loc, e: Entry, thumbDir: Boolean) {
         val ctx = view.context.applicationContext
@@ -66,11 +72,20 @@ object Thumbs {
                     bmp = genLocal(File(loc.path, e.name), e)
                     if (bmp != null) toDisk(ctx, k, bmp)
                 } else {
-                    slow.execute {
-                        if (view.tag != k) return@execute
-                        val b = genRemote(ctx, loc, e)
-                        if (b != null) { toDisk(ctx, k, b); deliver(view, k, b) }
+                    val job = Runnable {
+                        if (view.tag == k) {
+                            // big JPEG: show the tiny EXIF preview first (needs only the first bytes of the file)
+                            if (e.kind == Entry.K_IMAGE && (e.ext == "jpg" || e.ext == "jpeg") && e.size > 1_000_000L) {
+                                val pv = exifPreview(loc, e)
+                                if (pv != null) main.post { if (view.tag == k) show(view, pv) }
+                            }
+                            if (view.tag == k) {
+                                val b = genRemote(ctx, loc, e)
+                                if (b != null) { toDisk(ctx, k, b); deliver(view, k, b) }
+                            }
+                        }
                     }
+                    if (e.kind == Entry.K_VIDEO) slowVid.execute(job) else slowImg.execute(job)
                     return@execute
                 }
             }
@@ -114,6 +129,22 @@ object Thumbs {
         var s = 1
         while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= SIZE) s *= 2
         return BitmapFactory.decodeByteArray(b, 0, b.size, BitmapFactory.Options().apply { inSampleSize = s })
+    }
+
+    /** Low-resolution preview from the EXIF thumbnail (not cached; replaced by the real thumbnail later). */
+    private fun exifPreview(loc: Loc, e: Entry): Bitmap? = try {
+        val head = Rc.readHead(Rc.fileUrl(loc.remote!!, loc.path, e.name), 192 * 1024)
+        val ex = ExifInterface(ByteArrayInputStream(head))
+        val tb = ex.thumbnailBytes
+        if (tb == null) null else {
+            var bmp = BitmapFactory.decodeByteArray(tb, 0, tb.size)
+            val deg = when (ex.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) { 6 -> 90; 3 -> 180; 8 -> 270; else -> 0 }
+            if (bmp != null && deg != 0)
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(deg.toFloat()) }, true)
+            bmp
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private fun genLocal(f: File, e: Entry): Bitmap? = try {

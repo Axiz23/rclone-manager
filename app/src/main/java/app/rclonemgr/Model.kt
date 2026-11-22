@@ -45,7 +45,9 @@ class Entry(val name: String, val size: Long, val isDir: Boolean, val modified: 
 
 /** Names of the images in the folder being viewed (avoids huge Intents). */
 object MediaHolder {
-    @Volatile var names: List<String> = emptyList()
+    @Volatile var names: List<String> = emptyList()    // images in the current folder
+    @Volatile var videos: List<String> = emptyList()   // videos in the current folder
+    @Volatile var changed = false                      // a viewer deleted/moved something -> file list must reload
 }
 
 /** Cut / copy clipboard shared by the file list. */
