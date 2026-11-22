@@ -289,11 +289,11 @@ class FilesActivity : BaseActivity() {
         val m = tb.menu
         m.findItem(R.id.action_view_list)?.isChecked = !Prefs.grid(this)
         m.findItem(R.id.action_view_grid)?.isChecked = Prefs.grid(this)
-        val by = Prefs.sortBy(this)
-        m.findItem(R.id.action_sort_name)?.isChecked = by == 0
-        m.findItem(R.id.action_sort_type)?.isChecked = by == 1
-        m.findItem(R.id.action_sort_size)?.isChecked = by == 2
-        m.findItem(R.id.action_sort_modified)?.isChecked = by == 3
+        val sb = Prefs.sortBy(this)
+        m.findItem(R.id.action_sort_name)?.isChecked = sb == 0
+        m.findItem(R.id.action_sort_type)?.isChecked = sb == 1
+        m.findItem(R.id.action_sort_size)?.isChecked = sb == 2
+        m.findItem(R.id.action_sort_modified)?.isChecked = sb == 3
         m.findItem(R.id.action_sort_asc)?.isChecked = Prefs.sortAsc(this)
         m.findItem(R.id.action_sort_dirs)?.isChecked = Prefs.dirsFirst(this)
         m.findItem(R.id.action_show_hidden)?.isChecked = Prefs.showHidden(this)
@@ -324,7 +324,7 @@ class FilesActivity : BaseActivity() {
         return true
     }
 
-    private fun sortBy(by: Int) { Prefs.setSortBy(this, by); applyFilter() }
+    private fun sortBy(mode: Int) { Prefs.setSortBy(this, mode); applyFilter() }
 
     private fun copyPath() {
         val text = if (loc.remote == null) loc.path else "${loc.remote}:${loc.path}"
