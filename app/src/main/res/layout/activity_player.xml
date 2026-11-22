@@ -61,10 +61,20 @@
                 android:id="@+id/btnSavePhoto"
                 style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="34dp"
                 android:layout_gravity="center"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="12dp"
+                android:paddingTop="0dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="0dp"
                 android:text="Save as photo"
-                app:icon="@drawable/ic_photo" />
+                android:textSize="12sp"
+                app:icon="@drawable/ic_photo"
+                app:iconPadding="6dp"
+                app:iconSize="16dp" />
             <ImageButton
                 android:id="@+id/btnVolume"
                 android:layout_width="48dp"
@@ -84,12 +94,19 @@
             android:textAppearance="?attr/textAppearanceBodyMedium"
             android:textColor="@android:color/white" />
 
-        <com.google.android.material.slider.Slider
+        <SeekBar
             android:id="@+id/seek"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:valueFrom="0"
-            android:valueTo="1"
-            app:labelBehavior="gone" />
+            android:max="1000"
+            android:maxHeight="4dp"
+            android:minHeight="4dp"
+            android:paddingStart="8dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="10dp"
+            android:progressDrawable="@drawable/seek_progress"
+            android:splitTrack="false"
+            android:thumb="@drawable/seek_thumb" />
     </LinearLayout>
 </FrameLayout>

@@ -1,6 +1,8 @@
 package app.rclonemgr
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.widget.Toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
@@ -23,6 +25,20 @@ object Dialogs {
                 else onOk(t)
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    fun thumbLog(a: Activity) {
+        MaterialAlertDialogBuilder(a)
+            .setTitle("Thumbnail log")
+            .setMessage(ThumbLog.text())
+            .setPositiveButton("Close", null)
+            .setNeutralButton("Copy") { _, _ ->
+                a.getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("thumbnail log", ThumbLog.text()))
+                Toast.makeText(a, "Copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Clear") { _, _ -> ThumbLog.clear() }
             .show()
     }
 

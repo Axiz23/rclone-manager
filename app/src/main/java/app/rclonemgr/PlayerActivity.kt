@@ -15,6 +15,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.PopupMenu
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
@@ -23,7 +24,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.slider.Slider
 import java.io.File
 
 /** Video player with Google-Photos-like controls. Tap the video to hide / show the title bar and the controls. */
@@ -36,7 +36,7 @@ class PlayerActivity : BaseActivity() {
     private lateinit var tb: MaterialToolbar
     private lateinit var btnPlay: ImageButton
     private lateinit var btnVolume: ImageButton
-    private lateinit var seek: Slider
+    private lateinit var seek: SeekBar
     private lateinit var timeTv: TextView
 
     private var player: MediaPlayer? = null
@@ -103,17 +103,17 @@ class PlayerActivity : BaseActivity() {
             updateVolIcon()
         }
         findViewById<View>(R.id.btnSavePhoto).setOnClickListener { savePhoto() }
-        seek.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
-            override fun onStartTrackingTouch(slider: Slider) { dragging = true; ui.removeCallbacks(autoHide) }
-            override fun onStopTrackingTouch(slider: Slider) {
+        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
+                if (fromUser) timeTv.text = fmt(p) + " / " + fmt(vv.duration)
+            }
+            override fun onStartTrackingTouch(s: SeekBar) { dragging = true; ui.removeCallbacks(autoHide) }
+            override fun onStopTrackingTouch(s: SeekBar) {
                 dragging = false
-                vv.seekTo(slider.value.toInt())
+                vv.seekTo(s.progress)
                 setBars(true)
             }
         })
-        seek.addOnChangeListener { _, v, fromUser ->
-            if (fromUser) timeTv.text = fmt(v.toInt()) + " / " + fmt(vv.duration)
-        }
 
         vv.setOnPreparedListener { mp ->
             player = mp
@@ -121,7 +121,7 @@ class PlayerActivity : BaseActivity() {
             applyVolume(mp)
             if (speed != 1f) applySpeed(mp)
             progress.visibility = View.GONE
-            seek.valueTo = maxOf(1f, vv.duration.toFloat())
+            seek.max = maxOf(1, vv.duration)
             vv.start()
             updatePlayIcon()
             setBars(true)
@@ -134,6 +134,11 @@ class PlayerActivity : BaseActivity() {
             progress.visibility = View.GONE
             toast("Cannot play this video")
             true
+        }
+        vv.setOnInfoListener { _, what, _ ->
+            if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) progress.visibility = View.VISIBLE
+            else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) progress.visibility = View.GONE
+            false
         }
         updateVolIcon()
         play(index)
@@ -148,7 +153,8 @@ class PlayerActivity : BaseActivity() {
         tb.title = name
         tb.subtitle = if (videos.size > 1) "${i + 1} / ${videos.size}" else null
         progress.visibility = View.VISIBLE
-        seek.value = 0f
+        seek.progress = 0
+        seek.secondaryProgress = 0
         timeTv.text = "0:00 / 0:00"
         if (local) {
             vv.setVideoPath(File(dir, name).path)
@@ -188,9 +194,12 @@ class PlayerActivity : BaseActivity() {
         if (!::vv.isInitialized || dragging) return
         val dur = vv.duration
         if (dur <= 0) return
-        if (seek.valueTo != dur.toFloat()) seek.valueTo = maxOf(1f, dur.toFloat())
+        if (seek.max != dur) seek.max = dur
         val pos = vv.currentPosition.coerceIn(0, dur)
-        seek.value = pos.toFloat().coerceIn(seek.valueFrom, seek.valueTo)
+        seek.progress = pos
+        // buffered part of the video (lighter bar); local files are fully available
+        val buffered = if (local) dur else (dur.toLong() * vv.bufferPercentage / 100).toInt()
+        seek.secondaryProgress = buffered.coerceIn(pos, dur)
         timeTv.text = fmt(pos) + " / " + fmt(dur)
         updatePlayIcon()
     }

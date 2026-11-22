@@ -185,9 +185,10 @@ object Rc {
     }
 
     /** Opens a file for reading (the server supports Range requests, so seeking works). */
-    fun get(url: String): HttpURLConnection {
+    fun get(url: String, readTimeoutMs: Int = 60000): HttpURLConnection {
         if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
         val c = open(url)
+        c.readTimeout = readTimeoutMs
         if (c.responseCode !in 200..299) throw IOException(errorText(c))
         return c
     }

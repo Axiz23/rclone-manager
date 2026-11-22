@@ -214,6 +214,7 @@ class FilesActivity : BaseActivity() {
                 startActivity(Intent(this, JobsActivity::class.java))
             }))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings", action = { Dialogs.settings(this) }))
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_info, "Thumbnail log", action = { Dialogs.thumbLog(this) }))
         }
         navAdapter.items = items
         navAdapter.notifyDataSetChanged()
