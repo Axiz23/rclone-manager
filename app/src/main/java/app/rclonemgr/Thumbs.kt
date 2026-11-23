@@ -50,7 +50,7 @@ object Thumbs {
     private val vidQ = Lifo()
     private val fast = ThreadPoolExecutor(4, 4, 20, TimeUnit.SECONDS, fastQ).apply { allowCoreThreadTimeOut(true) }
     private val slowImg = ThreadPoolExecutor(3, 3, 20, TimeUnit.SECONDS, imgQ).apply { allowCoreThreadTimeOut(true) }
-    private val slowVid = ThreadPoolExecutor(1, 1, 20, TimeUnit.SECONDS, vidQ).apply { allowCoreThreadTimeOut(true) }
+    private val slowVid = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, vidQ).apply { allowCoreThreadTimeOut(true) }
 
     private fun dir(ctx: Context) = File(ctx.cacheDir, "thumbs").apply { mkdirs() }
 
@@ -59,9 +59,19 @@ object Thumbs {
 
     fun cancelAll() { fastQ.clear(); imgQ.clear(); vidQ.clear() }
 
+    private fun keyOf(loc: Loc, e: Entry) = md5("${loc.remote}:${loc.path}/${e.name}|${e.size}|${e.modified}")
+
+    /** Thumbnail that already exists (memory / disk cache / ".thumbnails"); never generates. Call off the main thread. */
+    fun peek(ctx: Context, loc: Loc, e: Entry): Bitmap? {
+        val k = keyOf(loc, e)
+        mem.get(k)?.let { return it }
+        fromDisk(ctx, k)?.let { return it }
+        return if (Prefs.useThumbFolder(ctx)) fromThumbFolder(ctx, loc, e, k) else null
+    }
+
     fun load(view: ImageView, loc: Loc, e: Entry, thumbDir: Boolean) {
         val ctx = view.context.applicationContext
-        val k = md5("${loc.remote}:${loc.path}/${e.name}|${e.size}|${e.modified}")
+        val k = keyOf(loc, e)
         view.tag = k
         mem.get(k)?.let { show(view, it); return }
         fast.execute {
@@ -74,29 +84,14 @@ object Thumbs {
                     if (bmp != null) toDisk(ctx, k, bmp)
                 } else {
                     val vid = e.kind == Entry.K_VIDEO
-                    val tag = if (vid) "vid" else "img"
-                    ThumbLog.count("$tag.queued")
                     val job = Runnable {
-                        if (view.tag != k) { ThumbLog.count("$tag.stale"); return@Runnable }
-                        ThumbLog.count("$tag.started")
-                        val t0 = SystemClock.elapsedRealtime()
-                        var err: String? = null
-                        var b: Bitmap? = null
-                        try {
-                            b = genRemote(loc, e, ctx) { pv -> main.post { if (view.tag == k) show(view, pv) } }
-                        } catch (ex: Exception) {
-                            err = ex.javaClass.simpleName + ": " + (ex.message ?: "")
-                        }
-                        val what = "$tag ${e.name} (${e.size / 1024} KB) ${SystemClock.elapsedRealtime() - t0} ms"
-                        val res: Bitmap? = b
-                        if (res != null) {
-                            toDisk(ctx, k, res)
-                            deliver(view, k, res)
-                            ThumbLog.count("$tag.ok")
-                            ThumbLog.add("ok   $what")
-                        } else {
-                            ThumbLog.count("$tag.fail")
-                            ThumbLog.add("FAIL $what - ${err ?: "no image"}")
+                        if (view.tag == k) {
+                            val b = try {
+                                genRemote(loc, e, ctx) { pv -> main.post { if (view.tag == k) show(view, pv) } }
+                            } catch (_: Exception) {
+                                null
+                            }
+                            if (b != null) { toDisk(ctx, k, b); deliver(view, k, b) }
                         }
                     }
                     if (vid) slowVid.execute(job) else slowImg.execute(job)

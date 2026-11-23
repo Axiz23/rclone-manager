@@ -47,6 +47,7 @@ class Entry(val name: String, val size: Long, val isDir: Boolean, val modified: 
 object MediaHolder {
     @Volatile var names: List<String> = emptyList()    // images in the current folder
     @Volatile var videos: List<String> = emptyList()   // videos in the current folder
+    @Volatile var images: List<Entry> = emptyList()    // images in the current folder (with size/date for thumbnail lookup)
     @Volatile var changed = false                      // a viewer deleted/moved something -> file list must reload
 }
 

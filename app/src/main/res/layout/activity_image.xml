@@ -6,6 +6,13 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
+    <ImageView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+
     <app.rclonemgr.ZoomImageView
         android:id="@+id/iv"
         android:layout_width="match_parent"

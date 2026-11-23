@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.core.view.WindowCompat
@@ -20,13 +21,14 @@ import java.util.concurrent.Executors
 
 class ImageActivity : BaseActivity() {
     private lateinit var iv: ZoomImageView
+    private lateinit var preview: ImageView
     private lateinit var progress: View
     private lateinit var bar: View
     private lateinit var tb: MaterialToolbar
     private var remote = ""
     private var dir = ""
     private var local = false
-    private var names: List<String> = emptyList()
+    private var items: List<Entry> = emptyList()
     private var index = 0
     private var token = 0
     private var acquired = false
@@ -45,7 +47,7 @@ class ImageActivity : BaseActivity() {
     private val slideRun = object : Runnable {
         override fun run() {
             if (!slideshow) return
-            if (index + 1 < names.size) { show(index + 1); ui.postDelayed(this, 3500) } else stopSlideshow()
+            if (index + 1 < items.size) { show(index + 1); ui.postDelayed(this, 3500) } else stopSlideshow()
         }
     }
 
@@ -58,12 +60,13 @@ class ImageActivity : BaseActivity() {
         remote = intent.getStringExtra("remote") ?: run { finish(); return }
         local = remote.isEmpty()
         dir = intent.getStringExtra("dir") ?: ""
-        names = MediaHolder.names
+        items = MediaHolder.images
         val start = intent.getIntExtra("index", 0)
-        if (names.isEmpty() || start !in names.indices) { finish(); return }
+        if (items.isEmpty() || start !in items.indices) { finish(); return }
         if (!local) { RcServer.acquire(this); acquired = true }
 
-        iv = findViewById(R.id.iv); progress = findViewById(R.id.progress); tb = findViewById(R.id.toolbar)
+        iv = findViewById(R.id.iv); preview = findViewById(R.id.preview)
+        progress = findViewById(R.id.progress); tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE); tb.setSubtitleTextColor(Color.LTGRAY)
         tb.setNavigationIconTint(Color.WHITE)
         tb.setNavigationOnClickListener { finish() }
@@ -72,7 +75,7 @@ class ImageActivity : BaseActivity() {
         tb.setOnMenuItemClickListener { showMenu(); true }
         iv.onSwipe = { d ->
             val n = index + d
-            if (n in names.indices) show(n)
+            if (n in items.indices) show(n)
         }
         iv.onTap = { if (slideshow) stopSlideshow() else setBars(!barsShown) }
         show(start)
@@ -109,7 +112,7 @@ class ImageActivity : BaseActivity() {
     }
 
     private fun onMenu(id: Int) {
-        val name = names[index]
+        val name = items[index].name
         when (id) {
             1 -> MediaActions.about(this, curLoc(), name, null)
             2 -> MediaActions.backup(this, curLoc(), name) { cb -> pending = cb; picker.launch(Unit) }
@@ -135,30 +138,48 @@ class ImageActivity : BaseActivity() {
 
     /** After delete / move: drop the current image from the list and show the next one. */
     private fun removeCurrent() {
-        val l = names.toMutableList()
+        val l = items.toMutableList()
         l.removeAt(index)
-        names = l
-        MediaHolder.names = l
+        items = l
+        MediaHolder.images = l
+        MediaHolder.names = l.map { it.name }
         if (l.isEmpty()) finish() else show(index.coerceAtMost(l.size - 1))
     }
 
     // ------------------------------------------------------------------ loading
 
+    /**
+     * Shows the thumbnail first (cache or ".thumbnails", if there is one) as a blurry preview, then cross-fades
+     * to the real image once it has been loaded.
+     */
     private fun show(i: Int) {
         index = i
-        val name = names[i]
+        val e = items[i]
         val my = ++token
         conn?.disconnect()
-        tb.title = name
-        tb.subtitle = "${i + 1} / ${names.size}"
+        tb.title = e.name
+        tb.subtitle = "${i + 1} / ${items.size}"
         progress.visibility = View.VISIBLE
+        iv.animate().cancel()
+        iv.setImageDrawable(null)
+        iv.alpha = 1f
+        preview.setImageDrawable(null)
+        val loc = curLoc()
         io.execute {
-            val bmp = try { fetch(name) } catch (_: Exception) { null }
+            val th = try { Thumbs.peek(applicationContext, loc, e) } catch (_: Exception) { null }
+            if (th != null) ui.post { if (my == token) preview.setImageBitmap(th) }
+            val bmp = try { fetch(e.name) } catch (_: Exception) { null }
             ui.post {
                 if (my == token) {
                     progress.visibility = View.GONE
-                    if (bmp != null) iv.setBitmapAndReset(bmp)
-                    else Toast.makeText(this, "Cannot load image", Toast.LENGTH_SHORT).show()
+                    if (bmp != null) {
+                        iv.alpha = 0f
+                        iv.setBitmapAndReset(bmp)
+                        iv.animate().alpha(1f).setDuration(250)
+                            .withEndAction { if (my == token) preview.setImageDrawable(null) }.start()
+                    } else {
+                        Toast.makeText(this, "Cannot load image", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }

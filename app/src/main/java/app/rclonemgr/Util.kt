@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.view.View
+import android.view.WindowManager
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -33,6 +34,10 @@ object Paths {
 
 /** Edge-to-edge on every Android version (Android < 15 does not enforce it), transparent system bars. */
 fun Activity.edgeToEdge() {
+    // Without this, hiding the status bar makes the window shrink / move by the height of the notch.
+    window.attributes = window.attributes.also {
+        it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+    }
     WindowCompat.setDecorFitsSystemWindows(window, false)
     window.statusBarColor = Color.TRANSPARENT
     window.navigationBarColor = Color.TRANSPARENT

@@ -221,7 +221,6 @@ class FilesActivity : BaseActivity() {
                 startActivity(Intent(this, JobsActivity::class.java))
             }))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings", action = { Dialogs.settings(this) }))
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_info, "Thumbnail log", action = { Dialogs.thumbLog(this) }))
         }
         navAdapter.items = items
         navAdapter.notifyDataSetChanged()
@@ -323,22 +322,26 @@ class FilesActivity : BaseActivity() {
 
     private fun sortBy(mode: Int) { Prefs.setSortBy(this, mode); applyFilter() }
 
-    /** "View and sort" popup: every row has the same layout, so radio buttons and check boxes line up. */
+    /** "View and sort" popup: every row has the same layout and icon size, so everything lines up. */
     private fun showViewSortPopup() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            minimumWidth = dp(184)
             setPadding(0, dp(8), 0, dp(8))
         }
-        val pw = PopupWindow(box, dp(260), ViewGroup.LayoutParams.WRAP_CONTENT, true)
+        val pw = PopupWindow(box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
         pw.elevation = dp(8).toFloat()
         pw.setBackgroundDrawable(GradientDrawable().apply {
             setColor(MaterialColors.getColor(tb, com.google.android.material.R.attr.colorSurfaceContainer))
             cornerRadius = dp(12).toFloat()
         })
         fun row(label: String, radio: Boolean, checked: Boolean, onClick: () -> Unit) {
-            val v = layoutInflater.inflate(if (radio) R.layout.row_radio else R.layout.row_check, box, false)
+            val v = layoutInflater.inflate(R.layout.row_option, box, false)
             v.findViewById<TextView>(R.id.label).text = label
-            v.findViewById<CompoundButton>(R.id.ctl).isChecked = checked
+            v.findViewById<ImageView>(R.id.ctl).setImageResource(
+                if (radio) (if (checked) R.drawable.ic_radio_on else R.drawable.ic_radio_off)
+                else (if (checked) R.drawable.ic_check_on else R.drawable.ic_check_off)
+            )
             v.setOnClickListener { pw.dismiss(); onClick() }
             box.addView(v)
         }
@@ -352,7 +355,7 @@ class FilesActivity : BaseActivity() {
         row("Grid", true, grid) { Prefs.setGrid(this, true); applyMode() }
         divider()
         val cur = Prefs.sortBy(this)
-        listOf("Sort by name", "Sort by type", "Sort by size", "Sort by last modified").forEachIndexed { i, t ->
+        listOf("Name", "Type", "Size", "Last modified").forEachIndexed { i, t ->
             row(t, true, cur == i) { sortBy(i) }
         }
         divider()
@@ -469,8 +472,10 @@ class FilesActivity : BaseActivity() {
         when (e.kind) {
             Entry.K_DIR -> navigate(loc.child(e.name))
             Entry.K_IMAGE -> {
-                val names = shown.filter { it.kind == Entry.K_IMAGE }.map { it.name }
+                val imgs = shown.filter { it.kind == Entry.K_IMAGE }
+                val names = imgs.map { it.name }
                 MediaHolder.names = names
+                MediaHolder.images = imgs
                 startActivity(
                     Intent(this, ImageActivity::class.java)
                         .putExtra("remote", remote).putExtra("dir", loc.path).putExtra("index", names.indexOf(e.name))
