@@ -99,6 +99,7 @@ class FilesActivity : BaseActivity() {
         adapter = FileAdapter({ loc }, { thumbDir }, { selected }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
         rv.adapter = adapter
         rv.setHasFixedSize(true)
+        findViewById<FastScrollView>(R.id.fastScroll).attach(rv)
         applyMode()
         swipe.setOnRefreshListener { load() }
 

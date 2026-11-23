@@ -6,26 +6,10 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <ImageView
-        android:id="@+id/preview"
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/pager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:importantForAccessibility="no"
-        android:scaleType="fitCenter" />
-
-    <app.rclonemgr.ZoomImageView
-        android:id="@+id/iv"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:importantForAccessibility="no" />
-
-    <com.google.android.material.progressindicator.CircularProgressIndicator
-        android:id="@+id/progress"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:indeterminate="true"
-        app:indicatorColor="@android:color/white" />
+        android:layout_height="match_parent" />
 
     <FrameLayout
         android:id="@+id/bar"

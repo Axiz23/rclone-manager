@@ -6,11 +6,65 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <VideoView
-        android:id="@+id/vv"
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/pv"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="center" />
+        app:resize_mode="fit"
+        app:shutter_background_color="@android:color/black"
+        app:surface_type="surface_view"
+        app:use_controller="false" />
+
+    <!-- gestures: tap = show/hide, double tap = +/-10 s, hold on left/right = 2x -->
+    <View
+        android:id="@+id/touch"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/skipLeft"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|center_vertical"
+        android:layout_marginStart="40dp"
+        android:alpha="0"
+        android:background="@drawable/bg_circle_dark"
+        android:gravity="center"
+        android:minWidth="76dp"
+        android:minHeight="76dp"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+    <TextView
+        android:id="@+id/skipRight"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="40dp"
+        android:alpha="0"
+        android:background="@drawable/bg_circle_dark"
+        android:gravity="center"
+        android:minWidth="76dp"
+        android:minHeight="76dp"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+    <TextView
+        android:id="@+id/holdTv"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="96dp"
+        android:background="@drawable/bg_pill_dark"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:text="2x  ▶▶"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <com.google.android.material.progressindicator.CircularProgressIndicator
         android:id="@+id/progress"

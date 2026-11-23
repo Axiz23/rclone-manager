@@ -56,6 +56,11 @@
                     android:paddingEnd="4dp"
                     android:paddingBottom="88dp" />
             </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+            <app.rclonemgr.FastScrollView
+                android:id="@+id/fastScroll"
+                android:layout_width="28dp"
+                android:layout_height="match_parent"
+                android:layout_gravity="end" />
             <LinearLayout
                 android:id="@+id/stateBox"
                 android:layout_width="match_parent"

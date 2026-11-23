@@ -95,6 +95,8 @@ class ZoomImageView @JvmOverloads constructor(c: Context, a: AttributeSet? = nul
     override fun onTouchEvent(e: MotionEvent): Boolean {
         sd.onTouchEvent(e)
         if (!sd.isInProgress) gd.onTouchEvent(e)
+        // zoomed in (or pinching): panning belongs to the image, not to the pager that swipes between photos
+        parent?.requestDisallowInterceptTouchEvent(scale() > minScale * 1.01f || e.pointerCount > 1)
         return true
     }
 }

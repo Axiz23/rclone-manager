@@ -8,35 +8,47 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.CompositePageTransformer
+import androidx.viewpager2.widget.MarginPageTransformer
+import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
 import java.io.File
 import java.net.HttpURLConnection
 import java.util.concurrent.Executors
+import kotlin.math.abs
 
+class PageVH(v: View) : RecyclerView.ViewHolder(v) {
+    val preview: ImageView = v.findViewById(R.id.preview)
+    val iv: ZoomImageView = v.findViewById(R.id.iv)
+    val progress: View = v.findViewById(R.id.progress)
+    var token = 0
+    @Volatile var conn: HttpURLConnection? = null
+}
+
+/** Photo viewer: swipe between photos (the page follows the finger), neighbours are preloaded. */
 class ImageActivity : BaseActivity() {
-    private lateinit var iv: ZoomImageView
-    private lateinit var preview: ImageView
-    private lateinit var progress: View
+    private lateinit var pager: ViewPager2
     private lateinit var bar: View
     private lateinit var tb: MaterialToolbar
+    private lateinit var adapter: PageAdapter
     private var remote = ""
     private var dir = ""
     private var local = false
     private var items: List<Entry> = emptyList()
     private var index = 0
-    private var token = 0
     private var acquired = false
     private var barsShown = true
     private var slideshow = false
     private var pending: ((Loc) -> Unit)? = null
-    @Volatile private var conn: HttpURLConnection? = null
-    private val io = Executors.newSingleThreadExecutor()
+    private val pool = Executors.newFixedThreadPool(2)
     private val ui = Handler(Looper.getMainLooper())
 
     private val picker = registerForActivityResult(MediaActions.PickFolder()) { l ->
@@ -47,7 +59,8 @@ class ImageActivity : BaseActivity() {
     private val slideRun = object : Runnable {
         override fun run() {
             if (!slideshow) return
-            if (index + 1 < items.size) { show(index + 1); ui.postDelayed(this, 3500) } else stopSlideshow()
+            if (index + 1 < items.size) { pager.setCurrentItem(index + 1, true); ui.postDelayed(this, 3500) }
+            else stopSlideshow()
         }
     }
 
@@ -65,23 +78,45 @@ class ImageActivity : BaseActivity() {
         if (items.isEmpty() || start !in items.indices) { finish(); return }
         if (!local) { RcServer.acquire(this); acquired = true }
 
-        iv = findViewById(R.id.iv); preview = findViewById(R.id.preview)
-        progress = findViewById(R.id.progress); tb = findViewById(R.id.toolbar)
+        tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE); tb.setSubtitleTextColor(Color.LTGRAY)
         tb.setNavigationIconTint(Color.WHITE)
         tb.setNavigationOnClickListener { finish() }
         tb.inflateMenu(R.menu.viewer)
         tb.menu.findItem(R.id.action_more)?.icon?.mutate()?.setTint(Color.WHITE)
         tb.setOnMenuItemClickListener { showMenu(); true }
-        iv.onSwipe = { d ->
-            val n = index + d
-            if (n in items.indices) show(n)
-        }
-        iv.onTap = { if (slideshow) stopSlideshow() else setBars(!barsShown) }
-        show(start)
+
+        pager = findViewById(R.id.pager)
+        adapter = PageAdapter()
+        pager.adapter = adapter
+        pager.offscreenPageLimit = 1
+        (pager.getChildAt(0) as? RecyclerView)?.setItemViewCacheSize(0)   // free off-screen bitmaps quickly
+        pager.setPageTransformer(CompositePageTransformer().apply {
+            addTransformer(MarginPageTransformer(dp(16)))
+            addTransformer(ViewPager2.PageTransformer { page, pos ->
+                val a = minOf(abs(pos), 1f)
+                page.alpha = 1f - 0.35f * a
+                val s = 1f - 0.08f * a
+                page.scaleX = s
+                page.scaleY = s
+            })
+        })
+        pager.setCurrentItem(start, false)
+        index = start
+        updateTitle()
+        pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) { index = position; updateTitle() }
+        })
     }
 
     private fun curLoc() = Loc(if (local) null else remote, dir)
+
+    private fun updateTitle() {
+        tb.title = items[index].name
+        tb.subtitle = "${index + 1} / ${items.size}"
+    }
+
+    private fun onPageTap() { if (slideshow) stopSlideshow() else setBars(!barsShown) }
 
     // ------------------------------------------------------------------ bars (title + system bars)
 
@@ -136,47 +171,68 @@ class ImageActivity : BaseActivity() {
         setBars(true)
     }
 
-    /** After delete / move: drop the current image from the list and show the next one. */
+    /** After delete / move: drop the current photo from the pager. */
     private fun removeCurrent() {
         val l = items.toMutableList()
-        l.removeAt(index)
+        val at = index
+        l.removeAt(at)
         items = l
         MediaHolder.images = l
         MediaHolder.names = l.map { it.name }
-        if (l.isEmpty()) finish() else show(index.coerceAtMost(l.size - 1))
+        if (l.isEmpty()) { finish(); return }
+        adapter.notifyItemRemoved(at)
+        index = index.coerceAtMost(l.size - 1)
+        updateTitle()
     }
 
-    // ------------------------------------------------------------------ loading
+    // ------------------------------------------------------------------ pages
+
+    private inner class PageAdapter : RecyclerView.Adapter<PageVH>() {
+        override fun getItemCount() = items.size
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PageVH {
+            val h = PageVH(layoutInflater.inflate(R.layout.item_image_page, parent, false))
+            h.iv.onTap = { onPageTap() }
+            return h
+        }
+
+        override fun onBindViewHolder(h: PageVH, position: Int) { load(h, items[position]) }
+
+        override fun onViewRecycled(h: PageVH) {
+            h.token++
+            h.conn?.disconnect()
+            h.iv.animate().cancel()
+            h.iv.setImageDrawable(null)
+            h.preview.setImageDrawable(null)
+        }
+    }
 
     /**
      * Shows the thumbnail first (cache or ".thumbnails", if there is one) as a blurry preview, then cross-fades
      * to the real image once it has been loaded.
      */
-    private fun show(i: Int) {
-        index = i
-        val e = items[i]
-        val my = ++token
-        conn?.disconnect()
-        tb.title = e.name
-        tb.subtitle = "${i + 1} / ${items.size}"
-        progress.visibility = View.VISIBLE
-        iv.animate().cancel()
-        iv.setImageDrawable(null)
-        iv.alpha = 1f
-        preview.setImageDrawable(null)
+    private fun load(h: PageVH, e: Entry) {
+        val my = ++h.token
+        h.conn?.disconnect()
+        h.iv.animate().cancel()
+        h.iv.setImageDrawable(null)
+        h.iv.alpha = 1f
+        h.preview.setImageDrawable(null)
+        h.progress.visibility = View.VISIBLE
         val loc = curLoc()
-        io.execute {
+        pool.execute {
+            if (h.token != my) return@execute
             val th = try { Thumbs.peek(applicationContext, loc, e) } catch (_: Exception) { null }
-            if (th != null) ui.post { if (my == token) preview.setImageBitmap(th) }
-            val bmp = try { fetch(e.name) } catch (_: Exception) { null }
+            if (th != null) ui.post { if (h.token == my) h.preview.setImageBitmap(th) }
+            val bmp = try { fetch(e.name, h) } catch (_: Exception) { null }
             ui.post {
-                if (my == token) {
-                    progress.visibility = View.GONE
+                if (h.token == my) {
+                    h.progress.visibility = View.GONE
                     if (bmp != null) {
-                        iv.alpha = 0f
-                        iv.setBitmapAndReset(bmp)
-                        iv.animate().alpha(1f).setDuration(250)
-                            .withEndAction { if (my == token) preview.setImageDrawable(null) }.start()
+                        h.iv.alpha = 0f
+                        h.iv.setBitmapAndReset(bmp)
+                        h.iv.animate().alpha(1f).setDuration(250)
+                            .withEndAction { if (h.token == my) h.preview.setImageDrawable(null) }.start()
                     } else {
                         Toast.makeText(this, "Cannot load image", Toast.LENGTH_SHORT).show()
                     }
@@ -198,12 +254,12 @@ class ImageActivity : BaseActivity() {
         }
 
     /** Local: decode directly. Remote: download to a temp file first. Always down-sampled (max 2048 px). */
-    private fun fetch(name: String): Bitmap? {
+    private fun fetch(name: String, h: PageVH): Bitmap? {
         if (local) return decode(File(dir, name))
         val tmp = File.createTempFile("view", ".tmp", cacheDir)
         try {
             val c = Rc.get(Rc.fileUrl(remote, dir, name))
-            conn = c
+            h.conn = c
             try {
                 c.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o, 32 * 1024) } }
             } finally {
@@ -216,10 +272,8 @@ class ImageActivity : BaseActivity() {
     }
 
     override fun onDestroy() {
-        token++
         ui.removeCallbacks(slideRun)
-        conn?.disconnect()
-        io.shutdownNow()
+        pool.shutdownNow()
         if (acquired) RcServer.release()
         super.onDestroy()
     }

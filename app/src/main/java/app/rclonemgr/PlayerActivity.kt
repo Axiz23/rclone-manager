@@ -3,14 +3,18 @@ package app.rclonemgr
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
+import android.view.GestureDetector
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.PixelCopy
+import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
@@ -18,18 +22,33 @@ import android.widget.PopupMenu
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.VideoView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 
-/** Video player with Google-Photos-like controls. Tap the video to hide / show the title bar and the controls. */
+/**
+ * Video player on Media3 / ExoPlayer with Google-Photos-like controls.
+ * Tap = show / hide bars, double tap right / left = +10 s / -10 s, hold right / left = 2x speed.
+ */
 class PlayerActivity : BaseActivity() {
     private lateinit var root: View
-    private lateinit var vv: VideoView
+    private lateinit var pv: PlayerView
+    private lateinit var touch: View
     private lateinit var progress: View
     private lateinit var bar: View
     private lateinit var controls: View
@@ -38,8 +57,11 @@ class PlayerActivity : BaseActivity() {
     private lateinit var btnVolume: ImageButton
     private lateinit var seek: SeekBar
     private lateinit var timeTv: TextView
+    private lateinit var skipLeft: TextView
+    private lateinit var skipRight: TextView
+    private lateinit var holdTv: TextView
+    private lateinit var player: ExoPlayer
 
-    private var player: MediaPlayer? = null
     private var acquired = false
     private var local = false
     private var remote = ""
@@ -50,7 +72,11 @@ class PlayerActivity : BaseActivity() {
     private var muted = false
     private var slideshow = false
     private var dragging = false
+    private var holding = false
     private var barsShown = true
+    private var lastSkip = 0L
+    private var skipDir = 0
+    private var skipAcc = 0
     private var pending: ((Loc) -> Unit)? = null
     private val ui = Handler(Looper.getMainLooper())
     private val speeds = floatArrayOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
@@ -62,7 +88,11 @@ class PlayerActivity : BaseActivity() {
     private val tick = object : Runnable {
         override fun run() { updateProgress(); ui.postDelayed(this, 250) }
     }
-    private val autoHide = Runnable { if (vv.isPlaying) setBars(false) }
+    private val autoHide = Runnable { if (player.isPlaying) setBars(false) }
+    private val hideSkip = Runnable {
+        skipLeft.animate().alpha(0f).setDuration(200).start()
+        skipRight.animate().alpha(0f).setDuration(200).start()
+    }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -80,9 +110,38 @@ class PlayerActivity : BaseActivity() {
         index = videos.indexOf(name)
         if (!local) { RcServer.pins++; RcServer.acquire(this); acquired = true }
 
-        vv = findViewById(R.id.vv); progress = findViewById(R.id.progress)
+        pv = findViewById(R.id.pv); touch = findViewById(R.id.touch); progress = findViewById(R.id.progress)
         btnPlay = findViewById(R.id.btnPlay); btnVolume = findViewById(R.id.btnVolume)
         seek = findViewById(R.id.seek); timeTv = findViewById(R.id.time)
+        skipLeft = findViewById(R.id.skipLeft); skipRight = findViewById(R.id.skipRight)
+        holdTv = findViewById(R.id.holdTv)
+
+        player = buildPlayer()
+        pv.player = player
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_BUFFERING -> progress.visibility = View.VISIBLE
+                    Player.STATE_READY -> progress.visibility = View.GONE
+                    Player.STATE_ENDED -> {
+                        progress.visibility = View.GONE
+                        if (slideshow && index + 1 < videos.size) play(index + 1) else setBars(true)
+                    }
+                    else -> { }
+                }
+                updatePlayIcon()
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                updatePlayIcon()
+                if (isPlaying) setBars(barsShown) // (re)start the auto-hide timer
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                progress.visibility = View.GONE
+                toast("Cannot play this video (${error.errorCodeName})")
+            }
+        })
 
         tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE)
@@ -92,57 +151,45 @@ class PlayerActivity : BaseActivity() {
         tb.menu.findItem(R.id.action_more)?.icon?.mutate()?.setTint(Color.WHITE)
         tb.setOnMenuItemClickListener { showMenu(); true }
 
-        root.setOnClickListener { setBars(!barsShown) }
-        btnPlay.setOnClickListener {
-            if (vv.isPlaying) vv.pause() else vv.start()
-            updatePlayIcon(); setBars(true)
-        }
-        btnVolume.setOnClickListener {
-            muted = !muted
-            player?.let { applyVolume(it) }
-            updateVolIcon()
-        }
+        btnPlay.setOnClickListener { togglePlay(); setBars(true) }
+        btnVolume.setOnClickListener { muted = !muted; applyVolume(); updateVolIcon() }
         findViewById<View>(R.id.btnSavePhoto).setOnClickListener { savePhoto() }
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
-                if (fromUser) timeTv.text = fmt(p) + " / " + fmt(vv.duration)
+                if (fromUser) timeTv.text = fmt(p.toLong()) + " / " + fmt(player.duration)
             }
             override fun onStartTrackingTouch(s: SeekBar) { dragging = true; ui.removeCallbacks(autoHide) }
             override fun onStopTrackingTouch(s: SeekBar) {
                 dragging = false
-                vv.seekTo(s.progress)
+                player.seekTo(s.progress.toLong())
                 setBars(true)
             }
         })
-
-        vv.setOnPreparedListener { mp ->
-            player = mp
-            mp.isLooping = Prefs.loop(this) && !slideshow
-            applyVolume(mp)
-            if (speed != 1f) applySpeed(mp)
-            progress.visibility = View.GONE
-            seek.max = maxOf(1, vv.duration)
-            vv.start()
-            updatePlayIcon()
-            setBars(true)
-        }
-        vv.setOnCompletionListener {
-            updatePlayIcon()
-            if (slideshow && index + 1 < videos.size) play(index + 1) else setBars(true)
-        }
-        vv.setOnErrorListener { _, _, _ ->
-            progress.visibility = View.GONE
-            toast("Cannot play this video")
-            true
-        }
-        vv.setOnInfoListener { _, what, _ ->
-            if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) progress.visibility = View.VISIBLE
-            else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) progress.visibility = View.GONE
-            false
-        }
+        setupGestures()
         updateVolIcon()
         play(index)
         ui.post(tick)
+    }
+
+    private fun buildPlayer(): ExoPlayer {
+        val http = DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(30_000)
+            .setReadTimeoutMs(60_000)
+            .setDefaultRequestProperties(mapOf("Authorization" to RcServer.auth))
+        // up to 50 s ahead, but never more than 32 MB of RAM
+        val load = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 50_000, 1_500, 3_000)
+            .setTargetBufferBytes(32 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+        return ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
+            .setLoadControl(load)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).setUsage(C.USAGE_MEDIA).build(), true
+            )
+            .build()
+            .also { it.setSeekParameters(SeekParameters.CLOSEST_SYNC) }
     }
 
     private fun curLoc() = Loc(if (local) null else remote, dir)
@@ -157,17 +204,101 @@ class PlayerActivity : BaseActivity() {
         seek.secondaryProgress = 0
         timeTv.text = "0:00 / 0:00"
         if (local) {
-            vv.setVideoPath(File(dir, name).path)
+            start(MediaItem.fromUri(Uri.fromFile(File(dir, name))))
         } else {
             Thread {
                 val ok = RcServer.awaitReady()
                 runOnUiThread {
                     if (isDestroyed) return@runOnUiThread
-                    if (ok) vv.setVideoURI(Uri.parse(Rc.fileUrl(remote, dir, name)), mapOf("Authorization" to RcServer.auth))
+                    if (ok) start(MediaItem.fromUri(Rc.fileUrl(remote, dir, name)))
                     else { progress.visibility = View.GONE; toast("rclone server did not start") }
                 }
             }.start()
         }
+    }
+
+    private fun start(item: MediaItem) {
+        player.setMediaItem(item)
+        player.prepare()
+        player.playWhenReady = true
+        player.setPlaybackSpeed(speed)
+        applyVolume()
+        applyLoop()
+    }
+
+    // ------------------------------------------------------------------ gestures
+
+    /** -1 = left part of the screen, 1 = right part, 0 = middle */
+    private fun zone(x: Float): Int {
+        val w = touch.width.toFloat()
+        return if (x < w * 0.35f) -1 else if (x > w * 0.65f) 1 else 0
+    }
+
+    private fun setupGestures() {
+        val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val z = zone(e.x)
+                // right after a double tap, more single taps keep skipping (like YouTube)
+                if (z != 0 && SystemClock.uptimeMillis() - lastSkip < 700) skip(z) else setBars(!barsShown)
+                return true
+            }
+
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                val z = zone(e.x)
+                if (z == 0) togglePlay() else skip(z)
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                if (zone(e.x) != 0) startHold()
+            }
+        })
+        touch.setOnTouchListener { _, ev ->
+            gd.onTouchEvent(ev)
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) endHold()
+            true
+        }
+    }
+
+    private fun skip(dir: Int) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastSkip > 800 || dir != skipDir) skipAcc = 0
+        skipDir = dir
+        lastSkip = now
+        skipAcc += 10
+        val dur = player.duration
+        val max = if (dur == C.TIME_UNSET || dur <= 0) Long.MAX_VALUE else dur
+        player.seekTo((player.currentPosition + dir * 10_000L).coerceIn(0L, max))
+        val shown = if (dir < 0) skipLeft else skipRight
+        val other = if (dir < 0) skipRight else skipLeft
+        other.animate().cancel(); other.alpha = 0f
+        shown.text = (if (dir < 0) "-" else "+") + skipAcc + "s"
+        shown.animate().cancel()
+        shown.alpha = 1f
+        ui.removeCallbacks(hideSkip)
+        ui.postDelayed(hideSkip, 700)
+    }
+
+    private fun startHold() {
+        holding = true
+        player.setPlaybackSpeed(2f)
+        holdTv.visibility = View.VISIBLE
+        touch.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+    }
+
+    private fun endHold() {
+        if (!holding) return
+        holding = false
+        player.setPlaybackSpeed(speed)
+        holdTv.visibility = View.GONE
+    }
+
+    private fun togglePlay() {
+        if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+        player.playWhenReady = !(player.playWhenReady && player.playbackState != Player.STATE_ENDED)
+        updatePlayIcon()
     }
 
     // ------------------------------------------------------------------ bars (title + controls + system bars)
@@ -191,44 +322,34 @@ class PlayerActivity : BaseActivity() {
     // ------------------------------------------------------------------ playback state
 
     private fun updateProgress() {
-        if (!::vv.isInitialized || dragging) return
-        val dur = vv.duration
-        if (dur <= 0) return
-        if (seek.max != dur) seek.max = dur
-        val pos = vv.currentPosition.coerceIn(0, dur)
-        seek.progress = pos
-        // buffered part of the video (lighter bar); local files are fully available
-        val buffered = if (local) dur else (dur.toLong() * vv.bufferPercentage / 100).toInt()
-        seek.secondaryProgress = buffered.coerceIn(pos, dur)
+        if (!::player.isInitialized || dragging) return
+        val dur = player.duration
+        if (dur == C.TIME_UNSET || dur <= 0) return
+        if (seek.max != dur.toInt()) seek.max = dur.toInt()
+        val pos = player.currentPosition.coerceIn(0L, dur)
+        seek.progress = pos.toInt()
+        seek.secondaryProgress = player.bufferedPosition.coerceIn(pos, dur).toInt()   // exact buffered position
         timeTv.text = fmt(pos) + " / " + fmt(dur)
         updatePlayIcon()
     }
 
     private fun updatePlayIcon() {
-        btnPlay.setImageResource(if (vv.isPlaying) R.drawable.ic_pause_w else R.drawable.ic_play_w)
+        val playing = player.playWhenReady && player.playbackState != Player.STATE_ENDED
+        btnPlay.setImageResource(if (playing) R.drawable.ic_pause_w else R.drawable.ic_play_w)
     }
 
     private fun updateVolIcon() {
         btnVolume.setImageResource(if (muted) R.drawable.ic_volume_off_w else R.drawable.ic_volume_on_w)
     }
 
-    private fun applyVolume(mp: MediaPlayer) {
-        val v = if (muted) 0f else 1f
-        mp.setVolume(v, v)
+    private fun applyVolume() { player.volume = if (muted) 0f else 1f }
+
+    private fun applyLoop() {
+        player.repeatMode = if (Prefs.loop(this) && !slideshow) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    private fun applySpeed(mp: MediaPlayer) {
-        try {
-            val was = vv.isPlaying
-            mp.playbackParams = mp.playbackParams.setSpeed(speed)
-            if (!was) vv.pause()
-        } catch (_: Exception) {
-            toast("Speed not supported for this video")
-        }
-    }
-
-    private fun fmt(ms: Int): String {
-        val s = ms.coerceAtLeast(0) / 1000
+    private fun fmt(ms: Long): String {
+        val s = ms.coerceAtLeast(0L) / 1000
         return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s % 3600) / 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
     }
 
@@ -260,7 +381,7 @@ class PlayerActivity : BaseActivity() {
             2 -> {
                 val v = !Prefs.loop(this)
                 Prefs.setLoop(this, v)                      // global setting
-                player?.isLooping = v && !slideshow
+                applyLoop()
                 toast(if (v) "Loop video on" else "Loop video off")
             }
             3 -> speedDialog()
@@ -269,7 +390,7 @@ class PlayerActivity : BaseActivity() {
             6 -> { pending = { d -> MediaActions.copyMove(this, curLoc(), name, d, false) { } }; picker.launch(Unit) }
             7 -> {
                 slideshow = !slideshow
-                player?.isLooping = Prefs.loop(this) && !slideshow
+                applyLoop()
                 toast(if (slideshow) "Slideshow: the next video plays when this one ends" else "Slideshow off")
             }
             8 -> MediaActions.cast(this)
@@ -278,9 +399,8 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun about() {
-        val mp = player
-        val extra = if (mp == null) null
-        else "Duration: ${fmt(vv.duration)}\nResolution: ${mp.videoWidth} x ${mp.videoHeight}"
+        val vs = player.videoSize
+        val extra = "Duration: ${fmt(player.duration)}\nResolution: ${vs.width} x ${vs.height}"
         MediaActions.about(this, curLoc(), videos[index], extra)
     }
 
@@ -290,7 +410,7 @@ class PlayerActivity : BaseActivity() {
             .setTitle("Playback speed")
             .setSingleChoiceItems(labels, speeds.indexOfFirst { it == speed }.coerceAtLeast(0)) { d, i ->
                 speed = speeds[i]
-                player?.let { applySpeed(it) }
+                player.setPlaybackSpeed(speed)
                 d.dismiss()
             }
             .show()
@@ -299,23 +419,14 @@ class PlayerActivity : BaseActivity() {
     // ------------------------------------------------------------------ save current frame as a photo
 
     private fun savePhoto() {
-        val mp = player ?: return
-        val vw = mp.videoWidth
-        val vh = mp.videoHeight
-        val w = vv.width
-        val h = vv.height
-        if (vw <= 0 || vh <= 0 || w <= 0 || h <= 0) return
-        val fname = videos[index].substringBeforeLast('.') + "_" + (vv.currentPosition / 1000) + "s.jpg"
-        val full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        PixelCopy.request(vv, full, { res ->
-            if (res != PixelCopy.SUCCESS) {
-                toast("Cannot capture this frame")
-            } else {
-                val s = minOf(w.toFloat() / vw, h.toFloat() / vh)
-                val rw = (vw * s).toInt().coerceIn(1, w)
-                val rh = (vh * s).toInt().coerceIn(1, h)
-                saveBitmap(Bitmap.createBitmap(full, (w - rw) / 2, (h - rh) / 2, rw, rh), fname)
-            }
+        val sv = pv.videoSurfaceView as? SurfaceView ?: return
+        val w = sv.width
+        val h = sv.height
+        if (w <= 0 || h <= 0) return
+        val fname = videos[index].substringBeforeLast('.') + "_" + (player.currentPosition / 1000) + "s.jpg"
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        PixelCopy.request(sv, bmp, { res ->
+            if (res == PixelCopy.SUCCESS) saveBitmap(bmp, fname) else toast("Cannot capture this frame")
         }, Handler(Looper.getMainLooper()))
     }
 
@@ -341,13 +452,14 @@ class PlayerActivity : BaseActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (::vv.isInitialized) { vv.pause(); updatePlayIcon() }
+        if (::player.isInitialized) { endHold(); player.pause(); updatePlayIcon() }
     }
 
     override fun onDestroy() {
         ui.removeCallbacks(tick)
         ui.removeCallbacks(autoHide)
-        if (::vv.isInitialized) vv.stopPlayback()
+        ui.removeCallbacks(hideSkip)
+        if (::player.isInitialized) player.release()
         if (acquired) { RcServer.pins--; RcServer.release() }
         super.onDestroy()
     }
