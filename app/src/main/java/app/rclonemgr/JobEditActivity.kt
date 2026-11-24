@@ -66,7 +66,7 @@ class JobEditActivity : BaseActivity() {
         transfersEt = findViewById(R.id.transfers)
 
         srcBox.setEndIconOnClickListener { pickDir.launch(null) }
-        remoteDd.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, RcloneRunner.remotes(this)))
+        remoteDd.setAdapter(ArrayAdapter(this, android.R.layout.simple_list_item_1, Remotes.cached(this)))
 
         for (i in 0..6) {
             val c = layoutInflater.inflate(R.layout.chip_day, daysGroup, false) as Chip

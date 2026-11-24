@@ -21,7 +21,6 @@ import androidx.viewpager2.widget.MarginPageTransformer
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
 import java.io.File
-import java.net.HttpURLConnection
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
@@ -30,7 +29,7 @@ class PageVH(v: View) : RecyclerView.ViewHolder(v) {
     val iv: ZoomImageView = v.findViewById(R.id.iv)
     val progress: View = v.findViewById(R.id.progress)
     var token = 0
-    @Volatile var conn: HttpURLConnection? = null
+    @Volatile var conn: Any? = null   // tag of the in-flight download
 }
 
 /** Photo viewer: swipe between photos (the page follows the finger), neighbours are preloaded. */
@@ -44,7 +43,6 @@ class ImageActivity : BaseActivity() {
     private var local = false
     private var items: List<Entry> = emptyList()
     private var index = 0
-    private var acquired = false
     private var barsShown = true
     private var slideshow = false
     private var pending: ((Loc) -> Unit)? = null
@@ -76,7 +74,6 @@ class ImageActivity : BaseActivity() {
         items = MediaHolder.images
         val start = intent.getIntExtra("index", 0)
         if (items.isEmpty() || start !in items.indices) { finish(); return }
-        if (!local) { RcServer.acquire(this); acquired = true }
 
         tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE); tb.setSubtitleTextColor(Color.LTGRAY)
@@ -200,7 +197,7 @@ class ImageActivity : BaseActivity() {
 
         override fun onViewRecycled(h: PageVH) {
             h.token++
-            h.conn?.disconnect()
+            h.conn?.let { Api.cancel(it) }
             h.iv.animate().cancel()
             h.iv.setImageDrawable(null)
             h.preview.setImageDrawable(null)
@@ -213,7 +210,7 @@ class ImageActivity : BaseActivity() {
      */
     private fun load(h: PageVH, e: Entry) {
         val my = ++h.token
-        h.conn?.disconnect()
+        h.conn?.let { Api.cancel(it) }
         h.iv.animate().cancel()
         h.iv.setImageDrawable(null)
         h.iv.alpha = 1f
@@ -253,18 +250,14 @@ class ImageActivity : BaseActivity() {
             }
         }
 
-    /** Local: decode directly. Remote: download to a temp file first. Always down-sampled (max 2048 px). */
+    /** Device: decode directly. Server: download to a temp file first. Always down-sampled (max 2048 px). */
     private fun fetch(name: String, h: PageVH): Bitmap? {
         if (local) return decode(File(dir, name))
         val tmp = File.createTempFile("view", ".tmp", cacheDir)
         try {
-            val c = Rc.get(Rc.fileUrl(remote, dir, name))
-            h.conn = c
-            try {
-                c.inputStream.use { i -> tmp.outputStream().use { o -> i.copyTo(o, 32 * 1024) } }
-            } finally {
-                c.disconnect()
-            }
+            val tag = Any()
+            h.conn = tag
+            Api.download(remote, Loc(remote, dir).child(name).path, tmp, tag)
             return decode(tmp)
         } finally {
             tmp.delete()
@@ -274,7 +267,6 @@ class ImageActivity : BaseActivity() {
     override fun onDestroy() {
         ui.removeCallbacks(slideRun)
         pool.shutdownNow()
-        if (acquired) RcServer.release()
         super.onDestroy()
     }
 }

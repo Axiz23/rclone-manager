@@ -14,8 +14,7 @@ android {
         minSdk = 30
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.6.0"
-        ndk { abiFilters += "arm64-v8a" }
+        versionName = "0.7.0"
     }
 
     signingConfigs {
@@ -38,14 +37,6 @@ android {
         }
     }
 
-    // rclone dieksekusi dari nativeLibraryDir (satu-satunya lokasi exec yg diizinkan Android 10+)
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-            keepDebugSymbols += "**/librclone.so"
-        }
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -61,4 +52,6 @@ dependencies {
     implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

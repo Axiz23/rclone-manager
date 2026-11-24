@@ -9,7 +9,6 @@ import android.text.format.Formatter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContract
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import org.json.JSONObject
 import java.io.File
 
 /** Actions shared by the image viewer and the video player (the "⋮" menu). */
@@ -36,11 +35,10 @@ object MediaActions {
                     val f = File(loc.path, name)
                     size = f.length(); mod = f.lastModified()
                 } else {
-                    val item = Rc.post("operations/stat", JSONObject().put("fs", loc.fs()).put("remote", name))
-                        .optJSONObject("item")
+                    val item = Api.list(loc.remote, loc.path).firstOrNull { it.name == name }
                     if (item != null) {
-                        size = item.optLong("Size", -1L)
-                        mod = Rc.parseTime(item.optString("ModTime"))
+                        size = item.size
+                        mod = item.modified
                     }
                 }
             } catch (_: Exception) {
@@ -62,8 +60,7 @@ object MediaActions {
     }
 
     fun copyMove(a: Activity, src: Loc, name: String, dst: Loc, cut: Boolean, onDone: () -> Unit) {
-        val rc = src.remote != null || dst.remote != null
-        OpRunner.run(a, if (cut) "Moving…" else "Copying…", rc, { c, p ->
+        OpRunner.run(a, if (cut) "Moving…" else "Copying…", { c, p ->
             Ops.paste(src, Entry(name, 0L, false), dst, cut, c, p)
         }) { err ->
             if (err == null) {
@@ -77,9 +74,9 @@ object MediaActions {
     fun delete(a: Activity, loc: Loc, name: String, onDone: () -> Unit) {
         MaterialAlertDialogBuilder(a)
             .setTitle("Delete file")
-            .setMessage("Delete \"$name\" from ${if (loc.remote == null) "this device" else "the remote"}? This cannot be undone.")
+            .setMessage("Delete \"$name\" from ${if (loc.remote == null) "this device" else "the server"}? This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
-                OpRunner.run(a, "Deleting…", loc.remote != null, { c, p ->
+                OpRunner.run(a, "Deleting…", { c, p ->
                     Ops.delete(loc, Entry(name, 0L, false), c, p)
                 }) { err ->
                     if (err == null) {
@@ -92,7 +89,7 @@ object MediaActions {
             .show()
     }
 
-    /** Copies a local file to the remembered backup folder (asks for one the first time). */
+    /** Copies a file to the remembered backup folder (uploads through the server when it is a remote). */
     fun backup(a: Activity, src: Loc, name: String, askFolder: ((Loc) -> Unit) -> Unit) {
         val saved = Prefs.backupDest(a)
         val go = { d: Loc ->
