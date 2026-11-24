@@ -89,7 +89,7 @@ class JobsActivity : BaseActivity() {
             }
             v.setOnClickListener { startActivity(Intent(this, JobEditActivity::class.java).putExtra("id", j.id)) }
             v.findViewById<Button>(R.id.btnRun).setOnClickListener {
-                if (RcloneRunner.remotes(this).isEmpty()) toast("Import rclone.conf first")
+                if (!Api.configured()) toast("Set up the server first")
                 else { startForegroundService(BackupService.intent(this, j.id)); toast("Backup started") }
             }
             v.findViewById<Button>(R.id.btnLog).setOnClickListener { showLog(j) }

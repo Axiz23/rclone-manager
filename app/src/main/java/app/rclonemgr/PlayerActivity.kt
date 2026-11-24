@@ -31,7 +31,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
@@ -62,7 +62,6 @@ class PlayerActivity : BaseActivity() {
     private lateinit var holdTv: TextView
     private lateinit var player: ExoPlayer
 
-    private var acquired = false
     private var local = false
     private var remote = ""
     private var dir = ""
@@ -108,7 +107,6 @@ class PlayerActivity : BaseActivity() {
         local = remote.isEmpty()
         videos = MediaHolder.videos.takeIf { name in it } ?: listOf(name)
         index = videos.indexOf(name)
-        if (!local) { RcServer.pins++; RcServer.acquire(this); acquired = true }
 
         pv = findViewById(R.id.pv); touch = findViewById(R.id.touch); progress = findViewById(R.id.progress)
         btnPlay = findViewById(R.id.btnPlay); btnVolume = findViewById(R.id.btnVolume)
@@ -172,10 +170,8 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun buildPlayer(): ExoPlayer {
-        val http = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(30_000)
-            .setReadTimeoutMs(60_000)
-            .setDefaultRequestProperties(mapOf("Authorization" to RcServer.auth))
+        // shared OkHttp client: HTTP/2, adds the Bearer token itself
+        val http = OkHttpDataSource.Factory(Api.client)
         // up to 50 s ahead, but never more than 32 MB of RAM
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(15_000, 50_000, 1_500, 3_000)
@@ -206,14 +202,7 @@ class PlayerActivity : BaseActivity() {
         if (local) {
             start(MediaItem.fromUri(Uri.fromFile(File(dir, name))))
         } else {
-            Thread {
-                val ok = RcServer.awaitReady()
-                runOnUiThread {
-                    if (isDestroyed) return@runOnUiThread
-                    if (ok) start(MediaItem.fromUri(Rc.fileUrl(remote, dir, name)))
-                    else { progress.visibility = View.GONE; toast("rclone server did not start") }
-                }
-            }.start()
+            start(MediaItem.fromUri(Api.streamUrl(remote, curLoc().child(name).path)))
         }
     }
 
@@ -460,7 +449,6 @@ class PlayerActivity : BaseActivity() {
         ui.removeCallbacks(autoHide)
         ui.removeCallbacks(hideSkip)
         if (::player.isInitialized) player.release()
-        if (acquired) { RcServer.pins--; RcServer.release() }
         super.onDestroy()
     }
 }

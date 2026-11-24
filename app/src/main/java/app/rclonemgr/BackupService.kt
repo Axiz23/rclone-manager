@@ -14,13 +14,14 @@ import android.os.PowerManager
 import android.os.SystemClock
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 class BackupService : Service() {
     private val pending = AtomicInteger(0)
     private var exec: ExecutorService? = null
     private var wl: PowerManager.WakeLock? = null
-    @Volatile private var proc: Process? = null
+    private val cancel = AtomicBoolean(false)
     @Volatile private var stopped = false
     @Volatile private var lastStartId = 0
     private var lastNotify = 0L
@@ -40,6 +41,7 @@ class BackupService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Api.init(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_RUN, "Backup running", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_DONE, "Backup results", NotificationManager.IMPORTANCE_DEFAULT))
@@ -55,7 +57,7 @@ class BackupService : Service() {
 
         if (i?.action == ACTION_STOP) {
             stopped = true
-            proc?.destroy()
+            cancel.set(true); Api.cancel(BackupRunner.TAG)
             if (pending.get() == 0) stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -63,6 +65,7 @@ class BackupService : Service() {
         if (id == null) { if (pending.get() == 0) stopSelf(startId); return START_NOT_STICKY }
 
         stopped = false
+        cancel.set(false)
         pending.incrementAndGet()
         exec?.execute {
             try {
@@ -81,7 +84,7 @@ class BackupService : Service() {
     // Android 15: batas waktu FGS dataSync
     override fun onTimeout(startId: Int, fgsType: Int) {
         stopped = true
-        proc?.destroy()
+        cancel.set(true); Api.cancel(BackupRunner.TAG)
         stopSelf()
     }
 
@@ -89,11 +92,12 @@ class BackupService : Service() {
         if (stopped) return
         val job = JobStore.get(this, id) ?: return
         notifyRun(job.name, "Starting…", true)
-        val code = RcloneRunner.run(this, job, { proc = it }) { notifyRun(job.name, it, false) }
+        val code = BackupRunner.run(this, job, cancel) { notifyRun(job.name, it, false) }
         job.lastRun = System.currentTimeMillis()
         job.lastStatus = when {
             stopped -> "Cancelled"
             code == 0 -> "Success"
+            code == 1 -> "Finished with errors (see log)"
             else -> "Failed (code $code)"
         }
         JobStore.save(this, job)
@@ -132,7 +136,7 @@ class BackupService : Service() {
 
     override fun onDestroy() {
         exec?.shutdownNow()
-        proc?.destroy()
+        cancel.set(true); Api.cancel(BackupRunner.TAG)
         wl?.let { if (it.isHeld) it.release() }
         super.onDestroy()
         // Tidak ada UI -> matikan proses agar RAM idle = 0 (alarm akan membangunkan lagi)

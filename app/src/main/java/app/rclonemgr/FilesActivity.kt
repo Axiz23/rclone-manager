@@ -44,7 +44,7 @@ import java.io.IOException
 import java.text.Collator
 import java.util.concurrent.Executors
 
-/** Main screen: file browser for internal storage (home) and rclone remotes, with a navigation drawer. */
+/** Main screen: file browser for device storage and the server's remotes (RCAPI), with a navigation drawer. */
 class FilesActivity : BaseActivity() {
     private class Base(val title: String, val path: String)
 
@@ -65,10 +65,8 @@ class FilesActivity : BaseActivity() {
     private var loc = Loc(null, Environment.getExternalStorageDirectory().path)
     private var entries: List<Entry> = emptyList()
     private var shown: List<Entry> = emptyList()
-    private var thumbDir = false
     private var query = ""
     private val selected = LinkedHashSet<String>()
-    private var rc = false
     private var permShown = false
     private var loadId = 0
     private val ioList = Executors.newFixedThreadPool(2)
@@ -77,7 +75,7 @@ class FilesActivity : BaseActivity() {
     private var searchItem: MenuItem? = null
     private var pickMode = false
 
-    private val pickConf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(::importConf) }
+    private var btnAction: (() -> Unit)? = null
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -96,7 +94,7 @@ class FilesActivity : BaseActivity() {
         pickMode = intent.getBooleanExtra("pick", false)
         if (pickMode) setupPickBar()
 
-        adapter = FileAdapter({ loc }, { thumbDir }, { selected }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
+        adapter = FileAdapter({ loc }, { selected }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
         rv.adapter = adapter
         rv.setHasFixedSize(true)
         findViewById<FastScrollView>(R.id.fastScroll).attach(rv)
@@ -107,13 +105,12 @@ class FilesActivity : BaseActivity() {
         navList.layoutManager = LinearLayoutManager(this)
         navList.adapter = navAdapter
         buildNav()
+        Remotes.refresh(this) { if (it != null) buildNav() }
 
         tb.setNavigationOnClickListener { onNavIcon() }
         tb.setOnMenuItemClickListener { onMenu(it.itemId) }
         setMode(false)
-        grantBtn.setOnClickListener {
-            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
-        }
+        grantBtn.setOnClickListener { btnAction?.invoke() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { onBack() }
         })
@@ -158,7 +155,6 @@ class FilesActivity : BaseActivity() {
 
     private fun navigate(l: Loc) {
         searchItem?.collapseActionView()
-        if (l.remote != null) needRc() else dropRc()
         loc = l
         selected.clear()
         buildCrumbs()
@@ -166,9 +162,6 @@ class FilesActivity : BaseActivity() {
         navAdapter.notifyDataSetChanged()
         load(true)
     }
-
-    private fun needRc() { if (!rc) { RcServer.acquire(this); rc = true } }
-    private fun dropRc() { if (rc) { RcServer.release(); rc = false } }
 
     private fun onNavClick(item: NavItem) {
         drawer.closeDrawer(GravityCompat.START)
@@ -213,10 +206,10 @@ class FilesActivity : BaseActivity() {
 
         items.add(NavItem(NavItem.DIVIDER))
         items.add(NavItem(NavItem.HEADER, title = "Remotes"))
-        for ((n, t) in RcloneRunner.remoteInfo(this))
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, n, t.ifEmpty { null }, Loc(n, "")))
+        for (n in Remotes.cached(this)) items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, n, null, Loc(n, "")))
         if (!pickMode) {
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_add, "Import rclone.conf", action = { pickConf.launch(arrayOf("*/*")) }))
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, "Server", (if (Api.configured()) Prefs.serverUrl(this) else "Not connected"),
+                action = { Dialogs.server(this) { buildNav(); Remotes.refresh(this) { buildNav() }; load() } }))
             items.add(NavItem(NavItem.DIVIDER))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_schedule, "Backup jobs", action = {
                 startActivity(Intent(this, JobsActivity::class.java))
@@ -225,19 +218,6 @@ class FilesActivity : BaseActivity() {
         }
         navAdapter.items = items
         navAdapter.notifyDataSetChanged()
-    }
-
-    private fun importConf(uri: Uri) {
-        try {
-            val dst = RcloneRunner.confFile(this)
-            val tmp = File(dst.path + ".tmp")
-            contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
-            if (!tmp.renameTo(dst)) throw IOException("rename failed")
-            toast("${RcloneRunner.remotes(this).size} remote(s) found")
-        } catch (e: Exception) {
-            toast("Import failed: ${e.message}")
-        }
-        buildNav()
     }
 
     private fun buildCrumbs() {
@@ -422,6 +402,22 @@ class FilesActivity : BaseActivity() {
         adapter.submit(emptyList(), Prefs.grid(this))
         stateBox.visibility = View.VISIBLE
         stateText.text = "Allow access to all files to browse this device's storage."
+        grantBtn.text = "Allow access"
+        btnAction = {
+            startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+        }
+        grantBtn.visibility = View.VISIBLE
+        updateTitle()
+    }
+
+    private fun showConnect() {
+        swipe.isRefreshing = false
+        entries = emptyList(); shown = emptyList()
+        adapter.submit(emptyList(), Prefs.grid(this))
+        stateBox.visibility = View.VISIBLE
+        stateText.text = "Connect to your RCAPI server to browse remotes."
+        grantBtn.text = "Connect"
+        btnAction = { Dialogs.server(this) { buildNav(); Remotes.refresh(this) { buildNav() }; load() } }
         grantBtn.visibility = View.VISIBLE
         updateTitle()
     }
@@ -430,6 +426,7 @@ class FilesActivity : BaseActivity() {
         val id = ++loadId
         val l = loc
         if (l.remote == null && !Environment.isExternalStorageManager()) { showPermission(); return }
+        if (l.remote != null && !Api.configured()) { showConnect(); return }
         permShown = false
         swipe.isRefreshing = true
         showState(null)
@@ -437,19 +434,16 @@ class FilesActivity : BaseActivity() {
         ioList.execute {
             try {
                 val list: List<Entry>
-                val td: Boolean
                 if (l.remote == null) {
                     val d = File(l.path)
                     val fs = d.listFiles() ?: throw IOException(if (d.exists()) "Cannot read this folder" else "Folder not found")
                     list = fs.map { Entry(it.name, if (it.isDirectory) 0L else it.length(), it.isDirectory, it.lastModified()) }
-                    td = true
                 } else {
-                    list = Rc.list(l.remote, l.path)
-                    td = list.any { it.isDir && it.name == ".thumbnails" }
+                    list = Api.list(l.remote, l.path)
                 }
                 ui.post {
                     if (id == loadId) {
-                        entries = list; thumbDir = td
+                        entries = list
                         swipe.isRefreshing = false
                         applyFilter()
                         if (reset) rv.scrollToPosition(0)
@@ -524,7 +518,6 @@ class FilesActivity : BaseActivity() {
         Thumbs.cancelAll()
         ioList.shutdownNow()
         ioOps.shutdownNow()
-        dropRc()
         super.onDestroy()
     }
 }

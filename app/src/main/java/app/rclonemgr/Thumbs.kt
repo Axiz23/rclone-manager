@@ -4,18 +4,13 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
-import android.graphics.Matrix
-import android.media.ExifInterface
-import android.media.MediaMetadataRetriever
 import android.media.ThumbnailUtils
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.LruCache
 import android.util.Size
 import android.widget.ImageView
 import java.io.File
-import java.io.IOException
 import java.security.MessageDigest
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.ThreadPoolExecutor
@@ -23,19 +18,20 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Thumbnails: memory LRU -> disk cache (cacheDir/thumbs) -> ".thumbnails/<file name>.webp" next to the file
- * -> generated from the original file. The first steps run on a wide pool (tiny files); generation from a
- * remote runs on separate pools for photos and videos (it downloads the original).
+ * Thumbnails.
+ *  - Remote files: memory LRU -> disk cache -> `GET /thumbnails/{id}` (the server generates, stores and serves them).
+ *    The app never downloads originals to make thumbnails.
+ *  - Device files: memory LRU -> disk cache -> decoded from the local file (there is no server copy to ask for).
  */
 object Thumbs {
+    const val TAG = "thumbs"
     private const val SIZE = 320
     private const val DISK_MAX = 100L * 1024 * 1024
-    private const val MAX_IMAGE_BYTES = 30L * 1024 * 1024
-    private const val MAX_THUMB_BYTES = 2L * 1024 * 1024
-    private const val GEN_TIMEOUT_MS = 45_000
+    private const val RETRY_AFTER_MS = 5 * 60_000L
 
     private val main = Handler(Looper.getMainLooper())
     private val writes = AtomicInteger()
+    private val failed = HashMap<String, Long>()
 
     private val mem = object : LruCache<String, Bitmap>(8 * 1024) {   // ~8 MB
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
@@ -45,60 +41,69 @@ object Thumbs {
     private class Lifo : LinkedBlockingDeque<Runnable>() {
         override fun offer(e: Runnable): Boolean = offerFirst(e)
     }
-    private val fastQ = Lifo()
-    private val imgQ = Lifo()
-    private val vidQ = Lifo()
-    private val fast = ThreadPoolExecutor(4, 4, 20, TimeUnit.SECONDS, fastQ).apply { allowCoreThreadTimeOut(true) }
-    private val slowImg = ThreadPoolExecutor(3, 3, 20, TimeUnit.SECONDS, imgQ).apply { allowCoreThreadTimeOut(true) }
-    private val slowVid = ThreadPoolExecutor(2, 2, 20, TimeUnit.SECONDS, vidQ).apply { allowCoreThreadTimeOut(true) }
+    private val netQ = Lifo()
+    private val localQ = Lifo()
+    private val net = ThreadPoolExecutor(6, 6, 20, TimeUnit.SECONDS, netQ).apply { allowCoreThreadTimeOut(true) }
+    private val local = ThreadPoolExecutor(3, 3, 20, TimeUnit.SECONDS, localQ).apply { allowCoreThreadTimeOut(true) }
 
     private fun dir(ctx: Context) = File(ctx.cacheDir, "thumbs").apply { mkdirs() }
 
     private fun md5(s: String) =
         MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
 
-    fun cancelAll() { fastQ.clear(); imgQ.clear(); vidQ.clear() }
-
     private fun keyOf(loc: Loc, e: Entry) = md5("${loc.remote}:${loc.path}/${e.name}|${e.size}|${e.modified}")
 
-    /** Thumbnail that already exists (memory / disk cache / ".thumbnails"); never generates. Call off the main thread. */
+    fun cancelAll() {
+        netQ.clear(); localQ.clear()
+        Api.cancel(TAG)
+    }
+
+    @Synchronized private fun recentlyFailed(k: String): Boolean {
+        val t = failed[k] ?: return false
+        if (System.currentTimeMillis() - t > RETRY_AFTER_MS) { failed.remove(k); return false }
+        return true
+    }
+    @Synchronized private fun markFailed(k: String) { failed[k] = System.currentTimeMillis() }
+
+    /** Cached thumbnail, or (remote) the server's. Never decodes originals. Call off the main thread. */
     fun peek(ctx: Context, loc: Loc, e: Entry): Bitmap? {
         val k = keyOf(loc, e)
         mem.get(k)?.let { return it }
         fromDisk(ctx, k)?.let { return it }
-        return if (Prefs.useThumbFolder(ctx)) fromThumbFolder(ctx, loc, e, k) else null
+        if (loc.remote == null || recentlyFailed(k)) return null
+        return try { fetchRemote(ctx, loc, e, k)?.also { mem.put(k, it) } } catch (_: Exception) { null }
     }
 
-    fun load(view: ImageView, loc: Loc, e: Entry, thumbDir: Boolean) {
+    fun load(view: ImageView, loc: Loc, e: Entry) {
         val ctx = view.context.applicationContext
         val k = keyOf(loc, e)
         view.tag = k
         mem.get(k)?.let { show(view, it); return }
-        fast.execute {
-            if (view.tag != k) return@execute
-            var bmp = fromDisk(ctx, k)
-            if (bmp == null && thumbDir && Prefs.useThumbFolder(ctx)) bmp = fromThumbFolder(ctx, loc, e, k)
-            if (bmp == null && Prefs.generateThumbs(ctx)) {
-                if (loc.remote == null) {
+        if (loc.remote == null) {
+            local.execute {
+                if (view.tag != k) return@execute
+                var bmp = fromDisk(ctx, k)
+                if (bmp == null) {
                     bmp = genLocal(File(loc.path, e.name), e)
                     if (bmp != null) toDisk(ctx, k, bmp)
-                } else {
-                    val vid = e.kind == Entry.K_VIDEO
-                    val job = Runnable {
-                        if (view.tag == k) {
-                            val b = try {
-                                genRemote(loc, e, ctx) { pv -> main.post { if (view.tag == k) show(view, pv) } }
-                            } catch (_: Exception) {
-                                null
-                            }
-                            if (b != null) { toDisk(ctx, k, b); deliver(view, k, b) }
-                        }
-                    }
-                    if (vid) slowVid.execute(job) else slowImg.execute(job)
-                    return@execute
                 }
+                if (bmp != null) deliver(view, k, bmp)
             }
-            if (bmp != null) deliver(view, k, bmp)
+        } else {
+            net.execute {
+                if (view.tag != k) return@execute
+                var bmp = fromDisk(ctx, k)
+                if (bmp == null && !recentlyFailed(k)) {
+                    bmp = try {
+                        fetchRemote(ctx, loc, e, k)
+                    } catch (ex: Exception) {
+                        if (!Api.isCanceled(ex)) markFailed(k)
+                        null
+                    }
+                    if (bmp == null && view.tag == k) markFailed(k)
+                }
+                if (bmp != null) deliver(view, k, bmp)
+            }
         }
     }
 
@@ -114,22 +119,15 @@ object Thumbs {
         v.setImageBitmap(b)
     }
 
-    /** `.thumbnails/<file name>.webp` in the same directory as the file. */
-    private fun fromThumbFolder(ctx: Context, loc: Loc, e: Entry, k: String): Bitmap? = try {
-        val name = e.name + ".webp"
-        val bytes: ByteArray? = if (loc.remote == null) {
-            val f = File(File(loc.path, ".thumbnails"), name)
-            if (f.isFile && f.length() in 1L..MAX_THUMB_BYTES) f.readBytes() else null
-        } else {
-            val d = if (loc.path.isEmpty()) ".thumbnails" else "${loc.path}/.thumbnails"
-            Rc.readBytes(Rc.fileUrl(loc.remote, d, name), MAX_THUMB_BYTES)
+    /** `GET /thumbnails/{id}`; the raw WebP bytes are cached as-is (no re-encoding). */
+    private fun fetchRemote(ctx: Context, loc: Loc, e: Entry, k: String): Bitmap? {
+        val bytes = Api.thumbnail(loc.remote!!, loc.child(e.name).path, TAG) ?: return null
+        try {
+            File(dir(ctx), "$k.webp").writeBytes(bytes)
+            if (writes.incrementAndGet() % 40 == 0) trim(ctx)
+        } catch (_: Exception) {
         }
-        if (bytes == null) null else {
-            File(dir(ctx), "$k.webp").writeBytes(bytes)   // keep the raw bytes in the cache, no re-encoding
-            decodeBytes(bytes)
-        }
-    } catch (_: Exception) {
-        null
+        return decodeBytes(bytes)
     }
 
     private fun decodeBytes(b: ByteArray): Bitmap? {
@@ -147,16 +145,6 @@ object Thumbs {
         null
     }
 
-    /** Generates from the original on the remote. Throws on failure so the reason can be logged. */
-    private fun genRemote(loc: Loc, e: Entry, ctx: Context, onPreview: (Bitmap) -> Unit): Bitmap? {
-        val url = Rc.fileUrl(loc.remote!!, loc.path, e.name)
-        if (e.kind == Entry.K_VIDEO) return videoThumb(url)
-        if (e.size !in 0L..MAX_IMAGE_BYTES)
-            throw IOException("too large for thumbnail generation (${e.size / 1048576} MB)")
-        val wantPreview = e.size > 1_000_000L && (e.ext == "jpg" || e.ext == "jpeg")
-        return downloadDecode(ctx, url, wantPreview, onPreview)
-    }
-
     private fun decodeFile(f: File): Bitmap =
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(f)) { dec, info, _ ->
             val m = maxOf(info.size.width, info.size.height)
@@ -169,95 +157,6 @@ object Thumbs {
             }
             dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
-
-    private fun decodeLegacy(f: File): Bitmap? {
-        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(f.path, o)
-        var s = 1
-        while (maxOf(o.outWidth, o.outHeight) / (s * 2) >= SIZE) s *= 2
-        return BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = s })
-    }
-
-    /** Low-resolution preview from the EXIF thumbnail of a (partially downloaded) JPEG. */
-    private fun exifFromFile(f: File): Bitmap? = try {
-        val ex = ExifInterface(f.path)
-        val tb = ex.thumbnailBytes
-        if (tb == null) null else {
-            var bmp = BitmapFactory.decodeByteArray(tb, 0, tb.size)
-            val deg = when (ex.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) { 6 -> 90; 3 -> 180; 8 -> 270; else -> 0 }
-            if (bmp != null && deg != 0)
-                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(deg.toFloat()) }, true)
-            bmp
-        }
-    } catch (_: Exception) {
-        null
-    }
-
-    /**
-     * One request per photo: stream the file into a temp file; after the first 192 KB show the EXIF preview (JPEG),
-     * keep downloading, then decode down-sampled.
-     */
-    private fun downloadDecode(ctx: Context, url: String, wantPreview: Boolean, onPreview: (Bitmap) -> Unit): Bitmap? {
-        val tmp = File.createTempFile("thumb", ".tmp", ctx.cacheDir)
-        try {
-            val c = Rc.get(url, GEN_TIMEOUT_MS)
-            try {
-                c.inputStream.use { i ->
-                    tmp.outputStream().use { o ->
-                        val buf = ByteArray(32 * 1024)
-                        var total = 0L
-                        var previewed = !wantPreview
-                        while (true) {
-                            val n = i.read(buf)
-                            if (n <= 0) break
-                            o.write(buf, 0, n)
-                            total += n
-                            if (!previewed && total >= 192 * 1024) {
-                                previewed = true
-                                o.flush()
-                                val pv = exifFromFile(tmp)
-                                if (pv != null) onPreview(pv)
-                            }
-                        }
-                    }
-                }
-            } finally {
-                c.disconnect()
-            }
-            return try { decodeFile(tmp) } catch (ex: Exception) { decodeLegacy(tmp) ?: throw ex }
-        } finally {
-            tmp.delete()
-        }
-    }
-
-    /** Video frame through the local HTTP server (only the needed byte ranges are fetched). */
-    private fun videoThumb(url: String): Bitmap? {
-        var last: Exception? = null
-        for (attempt in 0..1) {   // the first attempt often only warms the remote up
-            try { return videoThumbOnce(url) } catch (ex: Exception) { last = ex }
-        }
-        throw last ?: IOException("video thumbnail failed")
-    }
-
-    private fun videoThumbOnce(url: String): Bitmap? {
-        if (!RcServer.awaitReady()) throw IOException("rclone server did not start")
-        val r = MediaMetadataRetriever()
-        try {
-            r.setDataSource(url, mapOf("Authorization" to RcServer.auth))
-            val f = r.getFrameAtTime(1_000_000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                ?: r.getFrameAtTime(0L) ?: throw IOException("no video frame")
-            val m = maxOf(f.width, f.height)
-            if (m <= SIZE) return f
-            val s = SIZE.toFloat() / m
-            val out = Bitmap.createScaledBitmap(
-                f, (f.width * s).toInt().coerceAtLeast(1), (f.height * s).toInt().coerceAtLeast(1), true
-            )
-            if (out !== f) f.recycle()
-            return out
-        } finally {
-            r.release()
-        }
-    }
 
     private fun fromDisk(ctx: Context, k: String): Bitmap? {
         val f = File(dir(ctx), "$k.webp")
@@ -288,6 +187,7 @@ object Thumbs {
 
     fun clear(ctx: Context) {
         mem.evictAll()
+        synchronized(this) { failed.clear() }
         dir(ctx).listFiles()?.forEach { it.delete() }
     }
 }

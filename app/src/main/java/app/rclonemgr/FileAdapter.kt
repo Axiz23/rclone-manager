@@ -13,7 +13,6 @@ import com.google.android.material.color.MaterialColors
 
 class FileAdapter(
     private val locOf: () -> Loc,
-    private val thumbDir: () -> Boolean,
     private val selected: () -> Set<String>,
     private val onClick: (Entry) -> Unit,
     private val onLong: (Entry) -> Unit,
@@ -65,7 +64,7 @@ class FileAdapter(
                 else -> R.drawable.ic_file
             }
         )
-        if (e.kind == Entry.K_IMAGE || e.kind == Entry.K_VIDEO) Thumbs.load(h.img, locOf(), e, thumbDir())
+        if (e.kind == Entry.K_IMAGE || e.kind == Entry.K_VIDEO) Thumbs.load(h.img, locOf(), e)
 
         h.itemView.setOnClickListener { onClick(e) }
         h.itemView.setOnLongClickListener { onLong(e); true }

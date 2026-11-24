@@ -1,6 +1,6 @@
 package app.rclonemgr
 
-/** A directory: local (remote == null, absolute path) or on an rclone remote (path relative to remote root). */
+/** A directory: on the device (remote == null, absolute path) or on a server remote (path relative to the remote root). */
 data class Loc(val remote: String?, val path: String) {
     fun child(name: String): Loc = Loc(
         remote,
@@ -10,9 +10,6 @@ data class Loc(val remote: String?, val path: String) {
             else -> "$path/$name"
         }
     )
-
-    /** rclone "fs" string for this directory. */
-    fun fs(): String = if (remote == null) path else "$remote:$path"
 }
 
 class Entry(val name: String, val size: Long, val isDir: Boolean, val modified: Long = 0L) {

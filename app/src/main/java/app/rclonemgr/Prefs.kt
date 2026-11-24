@@ -12,10 +12,15 @@ object Prefs {
     fun setLoop(c: Context, v: Boolean) = putBool(c, "loop", v)
     fun grid(c: Context) = bool(c, "grid", false)
     fun setGrid(c: Context, v: Boolean) = putBool(c, "grid", v)
-    fun useThumbFolder(c: Context) = bool(c, "thumbFolder", true)
-    fun setUseThumbFolder(c: Context, v: Boolean) = putBool(c, "thumbFolder", v)
-    fun generateThumbs(c: Context) = bool(c, "generate", true)
-    fun setGenerateThumbs(c: Context, v: Boolean) = putBool(c, "generate", v)
+    fun serverUrl(c: Context) = sp(c).getString("serverUrl", "") ?: ""
+    fun token(c: Context) = sp(c).getString("token", "") ?: ""
+    fun setServer(c: Context, url: String, token: String) =
+        sp(c).edit().putString("serverUrl", url).putString("token", token).apply()
+    fun maxUpload(c: Context) = sp(c).getLong("maxUpload", 0L)
+    fun setMaxUpload(c: Context, v: Long) = sp(c).edit().putLong("maxUpload", v).apply()
+    fun remotes(c: Context): List<String> =
+        (sp(c).getString("remotes", "") ?: "").split('\n').filter { it.isNotEmpty() }
+    fun setRemotes(c: Context, l: List<String>) = sp(c).edit().putString("remotes", l.joinToString("\n")).apply()
     fun showHidden(c: Context) = bool(c, "hidden", false)
     fun setShowHidden(c: Context, v: Boolean) = putBool(c, "hidden", v)
     fun sortAsc(c: Context) = bool(c, "sortAsc", true)
