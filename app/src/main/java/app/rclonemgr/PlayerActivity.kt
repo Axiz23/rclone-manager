@@ -199,9 +199,11 @@ class PlayerActivity : BaseActivity() {
                 .also { cacheFactory = it }
         } else upstream
         val load = if (fallback >= 2) DefaultLoadControl.Builder().build() else DefaultLoadControl.Builder()
-            .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
-            .setTargetBufferBytes(8 * 1024 * 1024)   // RAM stays small; the disk cache holds the rest
-            .setPrioritizeTimeOverSizeThresholds(false)
+            // Time wins over the byte cap until 2.5 s are buffered: with a plain 8 MB cap a high-bitrate video never
+            // reached the start threshold and ExoPlayer threw "Playback stuck buffering and not loading".
+            .setBufferDurationsMs(2_500, 15_000, 1_000, 2_000)
+            .setTargetBufferBytes(8 * 1024 * 1024)   // beyond the 2.5 s minimum, RAM stays small; the disk cache holds the rest
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         return ExoPlayer.Builder(this)
             .setMediaSourceFactory(DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http)))
