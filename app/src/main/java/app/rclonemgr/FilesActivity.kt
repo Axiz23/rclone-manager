@@ -17,6 +17,7 @@ import android.view.Gravity
 import android.view.MenuItem
 import android.view.ViewGroup
 import android.widget.CompoundButton
+import android.widget.PopupMenu
 import android.widget.PopupWindow
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.divider.MaterialDivider
@@ -76,6 +77,12 @@ class FilesActivity : BaseActivity() {
     private var pickMode = false
 
     private var btnAction: (() -> Unit)? = null
+    private var cfgSig = ""
+    private var pendingPick: ((Loc) -> Unit)? = null
+    private val folderPicker = registerForActivityResult(MediaActions.PickFolder()) { l ->
+        if (l != null) pendingPick?.invoke(l)
+        pendingPick = null
+    }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -94,7 +101,7 @@ class FilesActivity : BaseActivity() {
         pickMode = intent.getBooleanExtra("pick", false)
         if (pickMode) setupPickBar()
 
-        adapter = FileAdapter({ loc }, { selected }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
+        adapter = FileAdapter({ loc }, { selected }, { !pickMode }, { open(it) }, { onItemLong(it) }, { e, v -> showItemMenu(e, v) })
         rv.adapter = adapter
         rv.setHasFixedSize(true)
         findViewById<FastScrollView>(R.id.fastScroll).attach(rv)
@@ -120,6 +127,9 @@ class FilesActivity : BaseActivity() {
     override fun onStart() {
         super.onStart()
         buildNav()
+        val sig = Prefs.serverUrl(this) + "|" + Prefs.token(this).hashCode() + "|" + (Prefs.adapter(this)?.hashCode() ?: 0)
+        if (cfgSig.isNotEmpty() && sig != cfgSig) { Remotes.refresh(this) { buildNav() }; load() }   // came back from Settings
+        cfgSig = sig
         if (MediaHolder.changed) { MediaHolder.changed = false; load() }
         if (permShown && Environment.isExternalStorageManager()) load()
     }
@@ -208,15 +218,13 @@ class FilesActivity : BaseActivity() {
         items.add(NavItem(NavItem.HEADER, title = "Remotes"))
         for (n in Remotes.cached(this)) items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, n, null, Loc(n, "")))
         if (!pickMode) {
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, "Server", (if (Api.configured()) Prefs.serverUrl(this) else "Not connected"),
-                action = { Dialogs.server(this) { buildNav(); Remotes.refresh(this) { buildNav() }; load() } }))
             items.add(NavItem(NavItem.DIVIDER))
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Adapter", Api.adapterName(),
-                action = { Dialogs.adapter(this) { buildNav(); load() } }))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_schedule, "Backup jobs", action = {
                 startActivity(Intent(this, JobsActivity::class.java))
             }))
-            items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings", action = { Dialogs.settings(this) }))
+            items.add(NavItem(NavItem.ITEM, R.drawable.ic_settings, "Settings",
+                if (Api.configured()) Prefs.serverUrl(this) else "Server not connected",
+                action = { startActivity(Intent(this, SettingsActivity::class.java)) }))
         }
         navAdapter.items = items
         navAdapter.notifyDataSetChanged()
@@ -419,7 +427,7 @@ class FilesActivity : BaseActivity() {
         stateBox.visibility = View.VISIBLE
         stateText.text = "Connect to your RCAPI server to browse remotes."
         grantBtn.text = "Connect"
-        btnAction = { Dialogs.server(this) { buildNav(); Remotes.refresh(this) { buildNav() }; load() } }
+        btnAction = { startActivity(Intent(this, SettingsActivity::class.java)) }
         grantBtn.visibility = View.VISIBLE
         updateTitle()
     }
@@ -462,6 +470,7 @@ class FilesActivity : BaseActivity() {
                         swipe.isRefreshing = false
                         entries = emptyList()
                         applyFilter()
+                        ClientLog.w("Files", "List ${l.remote ?: "device"}:${l.path} failed: ${ex.message}")
                         showState(ex.message ?: "Error")
                     }
                 }
@@ -496,7 +505,37 @@ class FilesActivity : BaseActivity() {
 
     // stage2 hooks (selection mode and file operations are added in stage 2)
     private fun onItemLong(e: Entry) {}
-    private fun showItemMenu(e: Entry, v: View) {}
+    /** The three-dot menu on every file and folder. */
+    private fun showItemMenu(e: Entry, v: View) {
+        val src = loc
+        val pm = PopupMenu(this, v, Gravity.END)
+        pm.setForceShowIcon(true)
+        val m = pm.menu
+        m.add(0, 1, 0, "Open").setIcon(R.drawable.ic_arrow_end)
+        m.add(0, 2, 1, "About").setIcon(R.drawable.ic_info)
+        m.add(0, 3, 2, "Rename").setIcon(R.drawable.ic_doc)
+        m.add(0, 4, 3, "Copy to…").setIcon(R.drawable.ic_copy)
+        m.add(0, 5, 4, "Move to…").setIcon(R.drawable.ic_move)
+        if (src.remote == null && !e.isDir) m.add(0, 6, 5, "Back up now").setIcon(R.drawable.ic_cloud_upload)
+        m.add(0, 7, 6, "Delete").setIcon(R.drawable.ic_delete)
+        pm.setOnMenuItemClickListener {
+            when (it.itemId) {
+                1 -> open(e)
+                2 -> MediaActions.about(this, src, e.name, null)
+                3 -> Dialogs.prompt(this, "Rename", "Name", e.name, "Rename") { n ->
+                    if (n != e.name) OpRunner.run(this, "Renaming…", { c, p -> Ops.rename(src, e, n, c, p) }) { err ->
+                        if (err == null) load() else toast(err)
+                    }
+                }
+                4 -> { pendingPick = { d -> MediaActions.copyMove(this, src, e.name, d, false, e.isDir) { load() } }; folderPicker.launch(Unit) }
+                5 -> { pendingPick = { d -> MediaActions.copyMove(this, src, e.name, d, true, e.isDir) { load() } }; folderPicker.launch(Unit) }
+                6 -> MediaActions.backup(this, src, e.name) { cb -> pendingPick = cb; folderPicker.launch(Unit) }
+                7 -> MediaActions.delete(this, src, e.name, e.isDir) { load() }
+            }
+            true
+        }
+        pm.show()
+    }
 
     // ---- folder picker mode (used by "Move to folder" / "Copy to folder" / "Back up now" in the viewers) ----
     private fun setupPickBar() {

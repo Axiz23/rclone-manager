@@ -14,6 +14,7 @@ import com.google.android.material.color.MaterialColors
 class FileAdapter(
     private val locOf: () -> Loc,
     private val selected: () -> Set<String>,
+    private val menuOn: () -> Boolean,
     private val onClick: (Entry) -> Unit,
     private val onLong: (Entry) -> Unit,
     private val onMenu: (Entry, View) -> Unit
@@ -68,6 +69,7 @@ class FileAdapter(
 
         h.itemView.setOnClickListener { onClick(e) }
         h.itemView.setOnLongClickListener { onLong(e); true }
+        h.menu?.visibility = if (menuOn() && selected().isEmpty()) View.VISIBLE else View.GONE
         h.menu?.setOnClickListener { onMenu(e, it) }
     }
 

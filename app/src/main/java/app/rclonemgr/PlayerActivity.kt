@@ -31,6 +31,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
@@ -72,7 +73,6 @@ class PlayerActivity : BaseActivity() {
     private var index = 0
     private var speed = 1f
     private var muted = false
-    private var slideshow = false
     private var dragging = false
     private var holding = false
     private var barsShown = true
@@ -81,6 +81,40 @@ class PlayerActivity : BaseActivity() {
     private var skipAcc = 0
     private var pending: ((Loc) -> Unit)? = null
     private var curUrl: String? = null
+    private var fallback = 0
+    private val playerListener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+            when (playbackState) {
+                Player.STATE_BUFFERING -> progress.visibility = View.VISIBLE
+                Player.STATE_READY -> progress.visibility = View.GONE
+                Player.STATE_ENDED -> {
+                    progress.visibility = View.GONE
+                    setBars(true)
+                }
+                else -> { }
+            }
+            updatePlayIcon()
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updatePlayIcon()
+            if (isPlaying) setBars(barsShown) // (re)start the auto-hide timer
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            progress.visibility = View.GONE
+            ClientLog.e("Player", "${videos[index]}: ${error.errorCodeName} (${error.errorCode}) fallback=$fallback", error)
+            val item = player.currentMediaItem
+            if (!local && item != null && fallback < 2) {
+                fallback++
+                ClientLog.w("Player", "Retrying without " + if (fallback == 1) "the disk cache" else "custom buffer limits")
+                rebuildPlayer(item, player.currentPosition)
+                return
+            }
+            toast("Cannot play this video (${error.errorCodeName}). See Settings > Client logs")
+        }
+    }
+
     private var prefetched = false
     @Volatile private var writer: CacheWriter? = null
     private lateinit var cacheFactory: CacheDataSource.Factory
@@ -123,30 +157,7 @@ class PlayerActivity : BaseActivity() {
 
         player = buildPlayer()
         pv.player = player
-        player.addListener(object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                when (playbackState) {
-                    Player.STATE_BUFFERING -> progress.visibility = View.VISIBLE
-                    Player.STATE_READY -> progress.visibility = View.GONE
-                    Player.STATE_ENDED -> {
-                        progress.visibility = View.GONE
-                        if (slideshow && index + 1 < videos.size) play(index + 1) else setBars(true)
-                    }
-                    else -> { }
-                }
-                updatePlayIcon()
-            }
-
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                updatePlayIcon()
-                if (isPlaying) setBars(barsShown) // (re)start the auto-hide timer
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                progress.visibility = View.GONE
-                toast("Cannot play this video (${error.errorCodeName})")
-            }
-        })
+        player.addListener(playerListener)
 
         tb = findViewById(R.id.toolbar)
         tb.setTitleTextColor(Color.WHITE)
@@ -177,14 +188,17 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun buildPlayer(): ExoPlayer {
-        // shared OkHttp client (HTTP/2, auth from the adapter) + disk cache: seeking back and looping read from disk
-        cacheFactory = CacheDataSource.Factory()
-            .setCache(VideoCache.get(this))
-            .setUpstreamDataSourceFactory(OkHttpDataSource.Factory(Api.client))
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        val http = cacheFactory
-        // up to 50 s ahead, but never more than 32 MB of RAM
-        val load = DefaultLoadControl.Builder()
+        // shared OkHttp client (HTTP/2, auth from the adapter). Level 0 adds the disk cache (looping reads from disk);
+        // after a playback error the player is rebuilt without it (level 1) and then with default buffering (level 2).
+        val upstream = OkHttpDataSource.Factory(Api.client)
+        val http: DataSource.Factory = if (fallback < 1) {
+            CacheDataSource.Factory()
+                .setCache(VideoCache.get(this))
+                .setUpstreamDataSourceFactory(upstream)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                .also { cacheFactory = it }
+        } else upstream
+        val load = if (fallback >= 2) DefaultLoadControl.Builder().build() else DefaultLoadControl.Builder()
             .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
             .setTargetBufferBytes(8 * 1024 * 1024)   // RAM stays small; the disk cache holds the rest
             .setPrioritizeTimeOverSizeThresholds(false)
@@ -196,7 +210,22 @@ class PlayerActivity : BaseActivity() {
                 AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).setUsage(C.USAGE_MEDIA).build(), true
             )
             .build()
-            .also { it.setSeekParameters(SeekParameters.CLOSEST_SYNC) }
+            .also { it.setSeekParameters(SeekParameters.EXACT) }   // CLOSEST_SYNC snapped every seek to the previous key frame
+    }
+
+    private fun rebuildPlayer(item: MediaItem, pos: Long) {
+        player.removeListener(playerListener)
+        player.release()
+        player = buildPlayer()
+        pv.player = player
+        player.addListener(playerListener)
+        player.setMediaItem(item, pos)
+        player.prepare()
+        player.playWhenReady = true
+        player.setPlaybackSpeed(speed)
+        applyVolume()
+        applyLoop()
+        progress.visibility = View.VISIBLE
     }
 
     private fun curLoc() = Loc(if (local) null else remote, dir)
@@ -216,6 +245,8 @@ class PlayerActivity : BaseActivity() {
             val u = Api.streamUrl(remote, curLoc().child(name).path)
             curUrl = u
             prefetched = false
+            fallback = 0
+            ClientLog.i("Player", "Play $name")
             writer?.cancel()
             start(MediaItem.fromUri(u))
         }
@@ -350,7 +381,7 @@ class PlayerActivity : BaseActivity() {
     private fun applyVolume() { player.volume = if (muted) 0f else 1f }
 
     private fun applyLoop() {
-        player.repeatMode = if (Prefs.loop(this) && !slideshow) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+        player.repeatMode = if (Prefs.loop(this)) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
     private fun fmt(ms: Long): String {
@@ -372,7 +403,6 @@ class PlayerActivity : BaseActivity() {
         if (local) m.add(0, 4, 3, "Back up now").setIcon(R.drawable.ic_cloud_upload)
         m.add(0, 5, 4, "Move to folder").setIcon(R.drawable.ic_move)
         m.add(0, 6, 5, "Copy to folder").setIcon(R.drawable.ic_copy)
-        m.add(0, 7, 6, if (slideshow) "Stop slideshow" else "Slideshow").setIcon(R.drawable.ic_slideshow)
         m.add(0, 8, 7, "Cast").setIcon(R.drawable.ic_cast)
         m.add(0, 9, 8, "Delete file").setIcon(R.drawable.ic_delete)
         pm.setOnMenuItemClickListener { onMenu(it.itemId); true }
@@ -393,11 +423,6 @@ class PlayerActivity : BaseActivity() {
             4 -> MediaActions.backup(this, curLoc(), name) { cb -> pending = cb; picker.launch(Unit) }
             5 -> { pending = { d -> MediaActions.copyMove(this, curLoc(), name, d, true) { finish() } }; picker.launch(Unit) }
             6 -> { pending = { d -> MediaActions.copyMove(this, curLoc(), name, d, false) { } }; picker.launch(Unit) }
-            7 -> {
-                slideshow = !slideshow
-                applyLoop()
-                toast(if (slideshow) "Slideshow: the next video plays when this one ends" else "Slideshow off")
-            }
             8 -> MediaActions.cast(this)
             9 -> MediaActions.delete(this, curLoc(), name) { finish() }
         }
@@ -458,7 +483,7 @@ class PlayerActivity : BaseActivity() {
      * show a loading spinner. No-op when they are already cached (the normal case after the first play).
      */
     private fun maybePrefetch() {
-        if (!::player.isInitialized || local) return
+        if (!::player.isInitialized || local || fallback >= 1 || !::cacheFactory.isInitialized) return
         val url = curUrl ?: return
         val dur = player.duration
         if (dur == C.TIME_UNSET || dur <= 0) return

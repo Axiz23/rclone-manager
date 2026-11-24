@@ -39,6 +39,7 @@ object OpRunner {
             } catch (e: Exception) {
                 err = if (cancel.get() || Api.isCanceled(e)) "Cancelled" else (e.message ?: "Error")
             }
+            if (err != null && err != "Cancelled") ClientLog.w("Ops", "$title failed: $err")
             a.runOnUiThread {
                 if (!a.isDestroyed) {
                     if (dlg.isShowing) dlg.dismiss()

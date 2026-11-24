@@ -36,6 +36,17 @@
             android:src="@drawable/ic_check"
             android:tint="?attr/colorOnPrimary"
             android:visibility="gone" />
+        <ImageButton
+            android:id="@+id/menuBtn"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="6dp"
+            android:background="@drawable/bg_circle_dark"
+            android:contentDescription="More"
+            android:padding="4dp"
+            android:src="@drawable/ic_more"
+            android:tint="@android:color/white" />
     </FrameLayout>
     <TextView
         android:id="@+id/name"

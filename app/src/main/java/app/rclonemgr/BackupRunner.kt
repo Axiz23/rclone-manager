@@ -165,6 +165,7 @@ object BackupRunner {
                 block.add("${job.source} -> ${job.dest()} ($mode)")
                 synchronized(ring) { block.addAll(ring) }
                 JobLog.append(ctx, job.id, block)
+                ClientLog.i("Backup", "${job.name}: exit=$code, ${uploaded.get()} uploaded, ${failed.get()} failed, ${deleted.get()} deleted")
             } catch (_: Exception) {
             }
         }

@@ -38,6 +38,7 @@ object Api {
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
+        ClientLog.init(app)
         base = Prefs.serverUrl(app)
         token = Prefs.token(app)
         val text = Prefs.adapter(app)
@@ -117,9 +118,14 @@ object Api {
 
     private fun <T> exec(req: Request, c: OkHttpClient = client, block: (Response) -> T): T {
         if (!configured()) throw IOException("Server is not configured")
-        c.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) throw fail(r)
-            return block(r)
+        try {
+            c.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) throw fail(r)
+                return block(r)
+            }
+        } catch (e: IOException) {
+            if (!isCanceled(e)) ClientLog.w("Api", "${req.method} ${req.url.encodedPath} failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw e
         }
     }
 
@@ -225,12 +231,18 @@ object Api {
     /** Server-generated thumbnail (WebP). null = not supported for this file type. */
     fun thumbnail(remote: String, path: String, tag: Any): ByteArray? {
         if (!configured()) throw IOException("Server is not configured")
-        thumbClient.newCall(req("thumbnail", vars(remote, path), tag)).execute().use { r ->
-            if (r.code == 415) return null
-            if (!r.isSuccessful) throw fail(r)
-            val b = r.body ?: return null
-            if (b.contentLength() > 2L * 1024 * 1024) return null
-            return b.bytes()
+        val rq = req("thumbnail", vars(remote, path), tag)
+        try {
+            thumbClient.newCall(rq).execute().use { r ->
+                if (r.code == 415) return null
+                if (!r.isSuccessful) throw fail(r)
+                val b = r.body ?: return null
+                if (b.contentLength() > 2L * 1024 * 1024) return null
+                return b.bytes()
+            }
+        } catch (e: IOException) {
+            if (!isCanceled(e)) ClientLog.w("Api", "thumbnail $path failed: ${e.javaClass.simpleName}: ${e.message}")
+            throw e
         }
     }
 

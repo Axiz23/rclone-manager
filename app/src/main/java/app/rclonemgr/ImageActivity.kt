@@ -44,7 +44,6 @@ class ImageActivity : BaseActivity() {
     private var items: List<Entry> = emptyList()
     private var index = 0
     private var barsShown = true
-    private var slideshow = false
     private var pending: ((Loc) -> Unit)? = null
     private val pool = Executors.newFixedThreadPool(2)
     @Volatile private var closed = false
@@ -54,14 +53,6 @@ class ImageActivity : BaseActivity() {
     private val picker = registerForActivityResult(MediaActions.PickFolder()) { l ->
         if (l != null) { pending?.invoke(l) }
         pending = null
-    }
-
-    private val slideRun = object : Runnable {
-        override fun run() {
-            if (!slideshow) return
-            if (index + 1 < items.size) { pager.setCurrentItem(index + 1, true); ui.postDelayed(this, 3500) }
-            else stopSlideshow()
-        }
     }
 
     override fun onCreate(b: Bundle?) {
@@ -115,7 +106,7 @@ class ImageActivity : BaseActivity() {
         tb.subtitle = "${index + 1} / ${items.size}"
     }
 
-    private fun onPageTap() { if (slideshow) stopSlideshow() else setBars(!barsShown) }
+    private fun onPageTap() { setBars(!barsShown) }
 
     // ------------------------------------------------------------------ bars (title + system bars)
 
@@ -138,7 +129,6 @@ class ImageActivity : BaseActivity() {
         if (local) m.add(0, 2, 1, "Back up now").setIcon(R.drawable.ic_cloud_upload)
         m.add(0, 3, 2, "Move to folder").setIcon(R.drawable.ic_move)
         m.add(0, 4, 3, "Copy to folder").setIcon(R.drawable.ic_copy)
-        m.add(0, 5, 4, if (slideshow) "Stop slideshow" else "Slideshow").setIcon(R.drawable.ic_slideshow)
         m.add(0, 6, 5, "Cast").setIcon(R.drawable.ic_cast)
         m.add(0, 7, 6, "Delete file").setIcon(R.drawable.ic_delete)
         pm.setOnMenuItemClickListener { onMenu(it.itemId); true }
@@ -152,22 +142,9 @@ class ImageActivity : BaseActivity() {
             2 -> MediaActions.backup(this, curLoc(), name) { cb -> pending = cb; picker.launch(Unit) }
             3 -> { pending = { d -> MediaActions.copyMove(this, curLoc(), name, d, true) { removeCurrent() } }; picker.launch(Unit) }
             4 -> { pending = { d -> MediaActions.copyMove(this, curLoc(), name, d, false) { } }; picker.launch(Unit) }
-            5 -> if (slideshow) stopSlideshow() else startSlideshow()
             6 -> MediaActions.cast(this)
             7 -> MediaActions.delete(this, curLoc(), name) { removeCurrent() }
         }
-    }
-
-    private fun startSlideshow() {
-        slideshow = true
-        setBars(false)
-        ui.postDelayed(slideRun, 3500)
-    }
-
-    private fun stopSlideshow() {
-        slideshow = false
-        ui.removeCallbacks(slideRun)
-        setBars(true)
     }
 
     /** After delete / move: drop the current photo from the pager. */
@@ -226,6 +203,7 @@ class ImageActivity : BaseActivity() {
             var err: String? = null
             val bmp = try { fetch(e, h) } catch (ex: Exception) { err = ex.message ?: ex.javaClass.simpleName; null }
             val msg = err
+            if (msg != null && !closed) ClientLog.w("Image", "Cannot load ${e.name}: $msg")
             ui.post {
                 if (h.token == my && !closed && !isDestroyed) {   // leaving the viewer interrupts loads: no toast then
                     h.progress.visibility = View.GONE
@@ -291,7 +269,6 @@ class ImageActivity : BaseActivity() {
     override fun onDestroy() {
         closed = true
         tags.forEach { Api.cancel(it) }
-        ui.removeCallbacks(slideRun)
         pool.shutdownNow()
         super.onDestroy()
     }

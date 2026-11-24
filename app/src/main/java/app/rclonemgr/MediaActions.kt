@@ -59,9 +59,9 @@ object MediaActions {
         }.start()
     }
 
-    fun copyMove(a: Activity, src: Loc, name: String, dst: Loc, cut: Boolean, onDone: () -> Unit) {
+    fun copyMove(a: Activity, src: Loc, name: String, dst: Loc, cut: Boolean, isDir: Boolean = false, onDone: () -> Unit) {
         OpRunner.run(a, if (cut) "Moving…" else "Copying…", { c, p ->
-            Ops.paste(src, Entry(name, 0L, false), dst, cut, c, p)
+            Ops.paste(src, Entry(name, 0L, isDir), dst, cut, c, p)
         }) { err ->
             if (err == null) {
                 MediaHolder.changed = true
@@ -71,13 +71,13 @@ object MediaActions {
         }
     }
 
-    fun delete(a: Activity, loc: Loc, name: String, onDone: () -> Unit) {
+    fun delete(a: Activity, loc: Loc, name: String, isDir: Boolean = false, onDone: () -> Unit) {
         MaterialAlertDialogBuilder(a)
-            .setTitle("Delete file")
+            .setTitle(if (isDir) "Delete folder" else "Delete file")
             .setMessage("Delete \"$name\" from ${if (loc.remote == null) "this device" else "the server"}? This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
                 OpRunner.run(a, "Deleting…", { c, p ->
-                    Ops.delete(loc, Entry(name, 0L, false), c, p)
+                    Ops.delete(loc, Entry(name, 0L, isDir), c, p)
                 }) { err ->
                     if (err == null) {
                         MediaHolder.changed = true
