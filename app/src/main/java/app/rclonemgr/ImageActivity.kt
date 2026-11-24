@@ -47,6 +47,8 @@ class ImageActivity : BaseActivity() {
     private var slideshow = false
     private var pending: ((Loc) -> Unit)? = null
     private val pool = Executors.newFixedThreadPool(2)
+    @Volatile private var closed = false
+    private val tags = java.util.concurrent.ConcurrentHashMap.newKeySet<Any>()   // in-flight downloads
     private val ui = Handler(Looper.getMainLooper())
 
     private val picker = registerForActivityResult(MediaActions.PickFolder()) { l ->
@@ -225,7 +227,7 @@ class ImageActivity : BaseActivity() {
             val bmp = try { fetch(e, h) } catch (ex: Exception) { err = ex.message ?: ex.javaClass.simpleName; null }
             val msg = err
             ui.post {
-                if (h.token == my) {
+                if (h.token == my && !closed && !isDestroyed) {   // leaving the viewer interrupts loads: no toast then
                     h.progress.visibility = View.GONE
                     if (bmp != null) {
                         h.iv.alpha = 0f
@@ -265,6 +267,7 @@ class ImageActivity : BaseActivity() {
             for (attempt in 0..1) {      // one retry: the server may hiccup under parallel loads
                 val tag = Any()
                 h.conn = tag
+                tags.add(tag)
                 try {
                     Api.download(remote, rp, part, tag)
                     if (!part.renameTo(f)) throw java.io.IOException("Cannot store the photo")
@@ -273,8 +276,10 @@ class ImageActivity : BaseActivity() {
                 } catch (ex: Exception) {
                     part.delete()
                     last = ex
-                    if (Api.isCanceled(ex)) throw ex
+                    if (closed || Api.isCanceled(ex)) throw ex
                     try { Thread.sleep(700) } catch (_: InterruptedException) { throw ex }
+                } finally {
+                    tags.remove(tag)
                 }
             }
             last?.let { throw it }
@@ -284,6 +289,8 @@ class ImageActivity : BaseActivity() {
     }
 
     override fun onDestroy() {
+        closed = true
+        tags.forEach { Api.cancel(it) }
         ui.removeCallbacks(slideRun)
         pool.shutdownNow()
         super.onDestroy()

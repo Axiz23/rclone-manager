@@ -186,7 +186,7 @@ class PlayerActivity : BaseActivity() {
         // up to 50 s ahead, but never more than 32 MB of RAM
         val load = DefaultLoadControl.Builder()
             .setBufferDurationsMs(10_000, 30_000, 1_000, 2_000)
-            .setTargetBufferBytes(12 * 1024 * 1024)   // RAM stays small; the disk cache holds the rest
+            .setTargetBufferBytes(8 * 1024 * 1024)   // RAM stays small; the disk cache holds the rest
             .setPrioritizeTimeOverSizeThresholds(false)
             .build()
         return ExoPlayer.Builder(this)
