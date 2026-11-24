@@ -1,0 +1,22 @@
+name: Unzip
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          unzip -q rclone-manager.zip -d /tmp/x
+          F=$(find /tmp/x -name settings.gradle.kts | head -1)
+          if [ -z "$F" ]; then echo "settings.gradle.kts tidak ditemukan"; find /tmp/x | head -30; exit 1; fi
+          TOP=$(dirname "$F")
+          rm -rf "$TOP/.github"
+          rm rclone-manager.zip
+          cp -a "$TOP"/. .
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git add -A
+          git commit -m "Extract project"
+          git push
