@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+*.jks
+*.zip
+core/target/
+app/src/main/jniLibs/
+rclone-manager-main

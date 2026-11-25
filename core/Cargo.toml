@@ -1,0 +1,32 @@
+[package]
+name = "rcm-core"
+version = "0.10.0"
+edition = "2021"
+description = "Core of Rclone Manager: API client, backup engine, file operations, caches and logs"
+publish = false
+
+[lib]
+name = "rcm_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "=0.21.1"
+serde = { version = "1", features = ["derive"] }
+# preserve_order keeps the key order of the adapter profile exactly as the user wrote it.
+serde_json = { version = "1", features = ["preserve_order"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip", "stream"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "fs", "io-util", "macros"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+regex = "1"
+md5 = "0.7"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+# Must stay "unwind": the JNI bridge turns panics into Java exceptions with catch_unwind.
+panic = "unwind"
