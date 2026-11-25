@@ -1,6 +1,0 @@
-.gradle/
-build/
-local.properties
-*.jks
-app/src/main/jniLibs/arm64-v8a/librclone.so
-*.zip
