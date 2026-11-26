@@ -33,7 +33,7 @@ fn scrubbers() -> &'static (Regex, Regex) {
     static R: OnceLock<(Regex, Regex)> = OnceLock::new();
     R.get_or_init(|| {
         (
-            Regex::new(r"(?i)(token|key|authorization)=[^&\s]+").expect("valid regex"),
+            Regex::new(r"(?i)(token|key|authorization|session)=[^&\s]+").expect("valid regex"),
             Regex::new(r"Bearer\s+\S+").expect("valid regex"),
         )
     })

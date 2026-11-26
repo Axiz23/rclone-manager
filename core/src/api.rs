@@ -41,6 +41,17 @@ struct Cfg {
     adapter_src: String,
     max_upload: i64,
     client: Option<Client>,
+    /// Remote-lock session token. Memory only: it is gone when the process ends.
+    session: Option<String>,
+}
+
+tokio::task_local! {
+    /// Set for everything a backup run does: such requests carry the backup header (see the adapter's `lock`).
+    pub static BACKUP: bool;
+}
+
+fn is_backup() -> bool {
+    BACKUP.try_with(|b| *b).unwrap_or(false)
 }
 
 fn cfg() -> &'static RwLock<Cfg> {
@@ -53,6 +64,7 @@ fn cfg() -> &'static RwLock<Cfg> {
             adapter_src: String::new(),
             max_upload: 0,
             client: None,
+            session: None,
         })
     })
 }
@@ -71,18 +83,23 @@ struct Snap {
     base: String,
     token: String,
     adapter: Arc<Adapter>,
+    session: Option<String>,
 }
 
 fn snapshot() -> Snap {
     let c = read_cfg();
-    Snap { base: c.base.clone(), token: c.token.clone(), adapter: c.adapter.clone() }
+    Snap { base: c.base.clone(), token: c.token.clone(), adapter: c.adapter.clone(), session: c.session.clone() }
 }
 
 /// Applies the saved settings. An unparsable stored adapter falls back to the default profile.
 pub fn configure(url: &str, token: &str, adapter_text: Option<&str>, max_upload: i64) {
     let mut c = write_cfg();
-    c.base = url.trim().trim_end_matches('/').to_string();
-    c.token = token.trim().to_string();
+    let (base, token) = (url.trim().trim_end_matches('/').to_string(), token.trim().to_string());
+    if base != c.base || token != c.token {
+        c.session = None; // a session only works with the token that created it
+    }
+    c.base = base;
+    c.token = token;
     c.max_upload = max_upload;
     let src = adapter_text.unwrap_or("").to_string();
     if src != c.adapter_src {
@@ -140,6 +157,9 @@ pub fn player_config() -> Value {
     }
     if let Some((k, v)) = s.adapter.auth_header(&s.token) {
         headers.insert(k, Value::String(v));
+    }
+    if let Some(sess) = &s.session {
+        headers.insert(s.adapter.session_header.clone(), Value::String(sess.clone()));
     }
     serde_json::json!({
         "headers": headers,
@@ -299,6 +319,14 @@ fn base_headers(snap: &Snap) -> Result<HeaderMap> {
     if let Some((k, v)) = snap.adapter.auth_header(&snap.token) {
         put_header(&mut h, &k, &v)?;
     }
+    if let Some(session) = &snap.session {
+        put_header(&mut h, &snap.adapter.session_header, session)?;
+    }
+    if is_backup() {
+        if let Some((k, v)) = &snap.adapter.backup_header {
+            put_header(&mut h, k, v)?;
+        }
+    }
     Ok(h)
 }
 
@@ -426,7 +454,7 @@ where
     let r = fut.await;
     if let Err(e) = &r {
         if !e.is_canceled() {
-            logs::warn("Api", &format!("{} {} failed: {}: {}", p.method, p.log_path(), e.kind(), e.message()));
+            logs::warn("Api", &format!("{} {} failed: {}: {}", p.method, p.log_path(), e.describe(), e.message()));
         }
     }
     r
@@ -487,42 +515,88 @@ pub async fn settings() -> Result<Value> {
     call_json("settings", Vars::new(), None).await
 }
 
-pub async fn remotes() -> Result<Vec<String>> {
-    let key = snapshot().adapter.field("remotesList", "remotes");
+/// Remote names plus their lock state.
+pub struct RemoteInfo {
+    pub remotes: Vec<String>,
+    /// Remotes that need a PIN.
+    pub locked: Vec<String>,
+    /// Locked remotes that this session has open right now.
+    pub unlocked: Vec<String>,
+}
+
+pub async fn remote_info() -> Result<RemoteInfo> {
+    let a = snapshot().adapter;
     let v = call_json("remotes", Vars::new(), None).await?;
-    Ok(names(&v, &key))
+    Ok(RemoteInfo {
+        remotes: names(&v, &a.field("remotesList", "remotes")),
+        locked: names(&v, &a.field("remotesLocked", "locked")),
+        unlocked: names(&v, &a.field("remotesUnlocked", "unlocked")),
+    })
+}
+
+/// Opens a locked remote with its PIN. `ttl_secs` is the idle time after which the server locks it again
+/// (0 = the server's maximum). The returned session is kept in memory and sent with every request.
+pub async fn unlock(remote: &str, pin: &str, ttl_secs: i64) -> Result<()> {
+    let mut v = vars(remote, "");
+    v.insert("pin".into(), Var::Str(pin.to_string()));
+    v.insert("ttl".into(), Var::Num(ttl_secs.max(0)));
+    let reply = call_json("unlock", v, None).await?;
+    let key = snapshot().adapter.field("unlockSession", "session");
+    let session = reply
+        .get(&key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::io("Unexpected unlock response"))?
+        .to_string();
+    write_cfg().session = Some(session);
+    crate::thumbs::forget_failures(); // thumbnails that failed while the remote was locked may work now
+    Ok(())
+}
+
+/// Locks one remote again, or all of them when `remote` is None. Requests already running are not affected.
+pub async fn lock(remote: Option<&str>) -> Result<()> {
+    call_empty("lock", vars(remote.unwrap_or(""), ""), None).await?;
+    if remote.is_none() {
+        write_cfg().session = None;
+    }
+    Ok(())
 }
 
 /// Result of a successful connection test.
 pub struct Connected {
     pub max_upload: i64,
     pub remotes: Vec<String>,
+    pub locked: Vec<String>,
 }
 
 /// Switches to `url` + `token` only if the server answers the settings endpoint; otherwise the previous
 /// settings stay in place.
 pub async fn try_configure(url: &str, token: &str) -> Result<Connected> {
-    let (old_base, old_token) = {
+    let (old_base, old_token, old_session) = {
         let c = read_cfg();
-        (c.base.clone(), c.token.clone())
+        (c.base.clone(), c.token.clone(), c.session.clone())
     };
     {
         let mut c = write_cfg();
         c.base = url.trim().trim_end_matches('/').to_string();
         c.token = token.trim().to_string();
+        if c.base != old_base || c.token != old_token {
+            c.session = None;
+        }
     }
     match settings().await {
         Ok(s) => {
             let a = snapshot().adapter;
             let max_upload = s.get(a.field("settingsMaxUpload", "maxUploadBytes")).map(int_of).unwrap_or(0);
             let remotes = names(&s, &a.field("settingsRemotes", "remotes"));
+            let locked = names(&s, &a.field("settingsLocked", "locked"));
             write_cfg().max_upload = max_upload;
-            Ok(Connected { max_upload, remotes })
+            Ok(Connected { max_upload, remotes, locked })
         }
         Err(e) => {
             let mut c = write_cfg();
             c.base = old_base;
             c.token = old_token;
+            c.session = old_session;
             Err(e)
         }
     }
@@ -619,7 +693,7 @@ pub async fn thumbnail(remote: &str, path: &str, tag: &str) -> Result<Option<Vec
     .await;
     if let Err(e) = &r {
         if !e.is_canceled() {
-            logs::warn("Api", &format!("thumbnail {path} failed: {}: {}", e.kind(), e.message()));
+            logs::warn("Api", &format!("thumbnail {path} failed: {}: {}", e.describe(), e.message()));
         }
     }
     r
@@ -769,7 +843,7 @@ mod tests {
     use super::*;
 
     fn snap(base: &str, token: &str) -> Snap {
-        Snap { base: base.to_string(), token: token.to_string(), adapter: Arc::new(Adapter::default_profile()) }
+        Snap { base: base.to_string(), token: token.to_string(), adapter: Arc::new(Adapter::default_profile()), session: None }
     }
 
     #[test]

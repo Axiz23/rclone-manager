@@ -78,12 +78,23 @@ pub fn dispatch(method: &str, args: &str, events: Sink) -> Result<Value> {
         }
         "server.connect" => {
             let c = block_on(api::try_configure(&s(&a, "url"), &s(&a, "token")))?;
-            Ok(json!({ "maxUpload": c.max_upload, "remotes": c.remotes }))
+            Ok(json!({ "maxUpload": c.max_upload, "remotes": c.remotes, "locked": c.locked }))
         }
         "player" => Ok(api::player_config()),
 
         // ---- browsing
-        "remotes" => Ok(json!(block_on(api::remotes())?)),
+        "remotes" => {
+            let r = block_on(api::remote_info())?;
+            Ok(json!({ "remotes": r.remotes, "locked": r.locked, "unlocked": r.unlocked }))
+        }
+        "session.unlock" => {
+            block_on(api::unlock(&s(&a, "remote"), &s(&a, "pin"), i(&a, "ttl")))?;
+            Ok(Value::Null)
+        }
+        "session.lock" => {
+            block_on(api::lock(os(&a, "remote").as_deref()))?;
+            Ok(Value::Null)
+        }
         "list" => to_value(&block_on(api::list(&s(&a, "remote"), &s(&a, "path")))?),
         "streamUrl" => Ok(json!(api::stream_url(&s(&a, "remote"), &s(&a, "path"))?)),
         "download" => {

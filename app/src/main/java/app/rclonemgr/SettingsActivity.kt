@@ -14,6 +14,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -37,6 +38,7 @@ class SettingsActivity : BaseActivity() {
         content = findViewById(R.id.content)
         buildServer()
         buildAdapter()
+        buildLock()
         buildPlayback()
         buildCache()
         buildLogs()
@@ -118,6 +120,35 @@ class SettingsActivity : BaseActivity() {
     private fun buildAdapter() {
         header("Connection")
         adapterSummary = row("Connection adapter", "", { startActivity(Intent(this, AdapterActivity::class.java)) })
+    }
+
+    private fun buildLock() {
+        header("Remote lock")
+        val options = listOf(0 to "On app restart", 5 to "After 5 min idle", 15 to "After 15 min idle", 30 to "After 30 min idle", 60 to "After 1 hour idle")
+        fun label() = options.firstOrNull { it.first == Prefs.lockMinutes(this) }?.second ?: options[0].second
+        lateinit var summary: TextView
+        summary = row("Remote session", label(), {
+            val cur = options.indexOfFirst { it.first == Prefs.lockMinutes(this) }.coerceAtLeast(0)
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Keep unlocked remotes open")
+                .setSingleChoiceItems(options.map { it.second }.toTypedArray(), cur) { d, i ->
+                    Prefs.setLockMinutes(this, options[i].first)
+                    summary.text = label()
+                    d.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        })
+        row("Lock all remotes now", "Uploads and downloads that are running are not interrupted", {
+            Thread {
+                val err = try { Api.lockAll(); null } catch (e: Exception) { e.message ?: "Failed" }
+                runOnUiThread {
+                    if (isDestroyed) return@runOnUiThread
+                    if (err == null) Remotes.clearOpen()
+                    Toast.makeText(this, err ?: "Remotes locked", Toast.LENGTH_SHORT).show()
+                }
+            }.start()
+        })
     }
 
     private fun buildPlayback() {

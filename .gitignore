@@ -5,4 +5,4 @@ local.properties
 *.zip
 core/target/
 app/src/main/jniLibs/
-rclone-manager-main
+rclone-manager-rust

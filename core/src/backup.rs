@@ -214,14 +214,17 @@ async fn execute(job: &Job, tok: &CancellationToken, st: &Arc<Stats>) -> Result<
                     _ = tok.cancelled() => None,
                 };
                 let Some(permit) = permit else { break 'walk };
-                tasks.spawn(upload_one(
-                    permit,
-                    st.clone(),
-                    tok.clone(),
-                    job.remote.clone(),
-                    join(&remote_dir, &f.name),
-                    f.path.clone(),
-                    join(&rel, &f.name),
+                tasks.spawn(api::BACKUP.scope(
+                    true,
+                    upload_one(
+                        permit,
+                        st.clone(),
+                        tok.clone(),
+                        job.remote.clone(),
+                        join(&remote_dir, &f.name),
+                        f.path.clone(),
+                        join(&rel, &f.name),
+                    ),
                 ));
             }
 
@@ -294,7 +297,8 @@ pub async fn run(job: Job, events: Sink) -> i32 {
         events,
     });
 
-    let code = match execute(&job, &tok, &st).await {
+    // Backups run unattended: their requests carry the backup header so locked remotes accept them without a PIN.
+    let code = match api::BACKUP.scope(true, execute(&job, &tok, &st)).await {
         Ok(c) => c,
         Err(e) => {
             if !tok.is_cancelled() {

@@ -14,7 +14,7 @@ android {
         minSdk = 30
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "0.10.0"
+        versionName = "0.10.1"
         // The Rust core (librcm_core.so) is built for arm64 only.
         ndk { abiFilters += "arm64-v8a" }
     }

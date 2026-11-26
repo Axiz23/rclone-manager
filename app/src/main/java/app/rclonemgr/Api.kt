@@ -69,12 +69,37 @@ object Api {
         Prefs.setServer(ctx, url.trim().trimEnd('/'), tok.trim())
         Prefs.setMaxUpload(ctx, r.optLong("maxUpload", 0L))
         Prefs.setRemotes(ctx, strings(r.optJSONArray("remotes")))
+        Prefs.setLockedRemotes(ctx, strings(r.optJSONArray("locked")))
         return r
     }
 
     private fun strings(a: JSONArray?): List<String> = if (a == null) emptyList() else List(a.length()) { a.getString(it) }
 
-    fun remotes(): List<String> = strings(Core.array("remotes"))
+    /** Remote names with their lock state. */
+    class RemoteInfo(val remotes: List<String>, val locked: List<String>, val unlocked: List<String>)
+
+    fun remoteInfo(): RemoteInfo {
+        val o = Core.run("remotes") as JSONObject
+        return RemoteInfo(strings(o.optJSONArray("remotes")), strings(o.optJSONArray("locked")), strings(o.optJSONArray("unlocked")))
+    }
+
+    fun remotes(): List<String> = remoteInfo().remotes
+
+    /**
+     * Opens a locked remote with its PIN. The idle time comes from Settings (0 = until the app restarts). The session
+     * lives in the core's memory only. Wrong PIN -> ApiException 403, too many attempts -> 429.
+     */
+    fun unlock(ctx: Context, remote: String, pin: String) {
+        Core.run("session.unlock", Core.args("remote" to remote, "pin" to pin, "ttl" to Prefs.lockMinutes(ctx) * 60L))
+    }
+
+    /** Locks every remote again. Transfers that are already running are not interrupted. */
+    fun lockAll() {
+        Core.run("session.lock", Core.args("remote" to null))
+    }
+
+    /** The server answered 423: the remote is locked (or its session expired). */
+    fun isLocked(e: Exception) = e is ApiException && e.status == 423
 
     /** Folder listing; the core also writes it to the disk cache. */
     fun list(remote: String, path: String): List<Entry> =
@@ -140,16 +165,29 @@ object Api {
 
 /** Remote names, cached in prefs so the drawer is instant and works offline. */
 object Remotes {
+    /** Locked remotes that the current session has open (from the last refresh / unlock). */
+    @Volatile var unlocked: Set<String> = emptySet()
+        private set
+
     fun cached(ctx: Context): List<String> = Prefs.remotes(ctx)
+    fun isLocked(ctx: Context, remote: String) = remote in Prefs.lockedRemotes(ctx)
+    fun isOpen(remote: String) = remote in unlocked
+    fun markOpen(remote: String) { unlocked = unlocked + remote }
+    fun markClosed(remote: String) { unlocked = unlocked - remote }
+    fun clearOpen() { unlocked = emptySet() }
 
     fun refresh(ctx: Context, done: (List<String>?) -> Unit) {
         Api.init(ctx)
         if (!Api.configured()) { done(null); return }
         val app = ctx.applicationContext
         Thread {
-            val l = try { Api.remotes() } catch (_: Exception) { null }
-            if (l != null) Prefs.setRemotes(app, l)
-            android.os.Handler(android.os.Looper.getMainLooper()).post { done(l) }
+            val info = try { Api.remoteInfo() } catch (_: Exception) { null }
+            if (info != null) {
+                Prefs.setRemotes(app, info.remotes)
+                Prefs.setLockedRemotes(app, info.locked)
+                unlocked = info.unlocked.toSet()
+            }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { done(info?.remotes) }
         }.start()
     }
 }

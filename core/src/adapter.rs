@@ -49,6 +49,10 @@ pub struct Adapter {
     pub auth_name: String,
     pub auth_prefix: String,
     pub headers: Vec<(String, String)>,
+    /// Header that carries the remote-lock session token.
+    pub session_header: String,
+    /// Header (name, value) that marks scheduled backups, which may run on locked remotes without a PIN.
+    pub backup_header: Option<(String, String)>,
     timeouts: Map<String, Value>,
     fields: Map<String, Value>,
     endpoints: Map<String, Value>,
@@ -57,16 +61,24 @@ pub struct Adapter {
 const REQUIRED: [&str; 11] =
     ["remotes", "settings", "list", "stream", "thumbnail", "mkdir", "rename", "delete", "copy", "move", "upload"];
 
+/// Endpoints that older saved profiles may lack; the built-in definition is used for them.
+const OPTIONAL: [&str; 2] = ["unlock", "lock"];
+
 /// The built-in profile for the RCAPI server.
 pub const DEFAULT_JSON: &str = r#"{
   "name": "rcapi-v1",
   "prefix": "api/v1",
   "auth": { "type": "bearer" },
   "headers": {},
+  "lock": { "header": "X-Remote-Session", "backupHeader": "X-Rcm-Backup", "backupValue": "1" },
   "timeouts": { "connect": 15, "read": 60, "write": 120, "upload": 900, "thumbnail": 120 },
   "fields": {
     "remotesList": "remotes",
+    "remotesLocked": "locked",
+    "remotesUnlocked": "unlocked",
     "settingsRemotes": "remotes",
+    "settingsLocked": "locked",
+    "unlockSession": "session",
     "settingsMaxUpload": "maxUploadBytes",
     "listItems": "items",
     "name": "name",
@@ -86,7 +98,9 @@ pub const DEFAULT_JSON: &str = r#"{
     "delete":    { "method": "POST", "path": "operations/delete", "body": { "remote": "{remote}", "path": "{path}", "isDir": "{isDir}" } },
     "copy":      { "method": "POST", "path": "operations/copy",   "body": { "remote": "{remote}", "path": "{path}", "destRemote": "{destRemote}", "dest": "{dest}" } },
     "move":      { "method": "POST", "path": "operations/move",   "body": { "remote": "{remote}", "path": "{path}", "destRemote": "{destRemote}", "dest": "{dest}" } },
-    "upload":    { "method": "PUT",  "path": "operations/upload", "query": { "remote": "{remote}", "path": "{path}", "modtime": "{modtime}" } }
+    "upload":    { "method": "PUT",  "path": "operations/upload", "query": { "remote": "{remote}", "path": "{path}", "modtime": "{modtime}" } },
+    "unlock":    { "method": "POST", "path": "remotes/unlock", "body": { "remote": "{remote}", "pin": "{pin}", "ttl": "{ttl}" } },
+    "lock":      { "method": "POST", "path": "remotes/lock",   "body": { "remote": "{remote}" } }
   }
 }"#;
 
@@ -140,7 +154,14 @@ impl Adapter {
             .map(|h| h.iter().map(|(k, v)| (k.clone(), text_of(v))).collect())
             .unwrap_or_default();
 
+        let lock = object_or_empty(obj, "lock");
+        let backup_name = opt_string(&lock, "backupHeader", "X-Rcm-Backup");
+        let backup_header =
+            if backup_name.is_empty() { None } else { Some((backup_name, opt_string(&lock, "backupValue", "1"))) };
+
         let adapter = Adapter {
+            session_header: opt_string(&lock, "header", "X-Remote-Session"),
+            backup_header,
             name: opt_string(obj, "name", "custom"),
             prefix: opt_string(obj, "prefix", "api/v1").trim_matches('/').to_string(),
             auth_name: opt_string(&auth, "name", default_auth_name),
@@ -188,9 +209,12 @@ impl Adapter {
     }
 
     pub fn endpoint(&self, key: &str) -> Result<Endpoint> {
+        // Locking endpoints are optional so adapters saved before locking existed keep working.
+        let fallback = if OPTIONAL.contains(&key) { default_endpoints().get(key) } else { None };
         let e = self
             .endpoints
             .get(key)
+            .or(fallback)
             .and_then(Value::as_object)
             .ok_or_else(|| Error::Adapter(format!("Adapter has no endpoint \"{key}\"")))?;
         let path = e
@@ -209,6 +233,16 @@ impl Adapter {
             body: e.get("body").and_then(Value::as_object).cloned(),
         })
     }
+}
+
+fn default_endpoints() -> &'static Map<String, Value> {
+    static E: OnceLock<Map<String, Value>> = OnceLock::new();
+    E.get_or_init(|| {
+        serde_json::from_str::<Value>(DEFAULT_JSON)
+            .ok()
+            .and_then(|v| v.get("endpoints").and_then(Value::as_object).cloned())
+            .unwrap_or_default()
+    })
 }
 
 fn var_regex() -> &'static Regex {
@@ -287,6 +321,21 @@ mod tests {
         assert_eq!(a.seconds("read", 1), 60);
         assert_eq!(a.endpoint("upload").unwrap().method, "PUT");
         assert_eq!(a.auth_header("t").unwrap(), ("Authorization".to_string(), "Bearer t".to_string()));
+    }
+
+    #[test]
+    fn old_profiles_get_the_lock_endpoints() {
+        let mut v: Value = serde_json::from_str(DEFAULT_JSON).unwrap();
+        let eps = v["endpoints"].as_object_mut().unwrap();
+        eps.remove("unlock");
+        eps.remove("lock");
+        v.as_object_mut().unwrap().remove("lock");
+        let old = v.to_string();
+        let a = Adapter::parse(&old).unwrap();
+        assert_eq!(a.endpoint("unlock").unwrap().path, "remotes/unlock");
+        assert_eq!(a.endpoint("lock").unwrap().method, "POST");
+        assert_eq!(a.session_header, "X-Remote-Session");
+        assert_eq!(a.backup_header, Some(("X-Rcm-Backup".to_string(), "1".to_string())));
     }
 
     #[test]

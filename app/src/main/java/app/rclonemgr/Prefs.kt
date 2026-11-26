@@ -26,6 +26,13 @@ object Prefs {
     fun remotes(c: Context): List<String> =
         (sp(c).getString("remotes", "") ?: "").split('\n').filter { it.isNotEmpty() }
     fun setRemotes(c: Context, l: List<String>) = sp(c).edit().putString("remotes", l.joinToString("\n")).apply()
+    /** Remotes that need a PIN (cached so the drawer shows the lock icons offline). */
+    fun lockedRemotes(c: Context): List<String> =
+        (sp(c).getString("lockedRemotes", "") ?: "").split('\n').filter { it.isNotEmpty() }
+    fun setLockedRemotes(c: Context, l: List<String>) = sp(c).edit().putString("lockedRemotes", l.joinToString("\n")).apply()
+    /** Idle minutes before an unlocked remote locks again; 0 = until the app restarts. */
+    fun lockMinutes(c: Context) = sp(c).getInt("lockMinutes", 0)
+    fun setLockMinutes(c: Context, v: Int) = sp(c).edit().putInt("lockMinutes", v).apply()
     fun showHidden(c: Context) = bool(c, "hidden", false)
     fun setShowHidden(c: Context, v: Boolean) = putBool(c, "hidden", v)
     fun sortAsc(c: Context) = bool(c, "sortAsc", true)

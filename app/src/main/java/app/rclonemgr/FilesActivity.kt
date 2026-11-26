@@ -176,7 +176,19 @@ class FilesActivity : BaseActivity() {
     private fun onNavClick(item: NavItem) {
         drawer.closeDrawer(GravityCompat.START)
         val l = item.loc
+        val r = l?.remote
+        if (l != null && r != null && Remotes.isLocked(this, r) && !Remotes.isOpen(r)) { askPin(r) { navigate(l) }; return }
         if (l != null) navigate(l) else item.action?.invoke()
+    }
+
+    /** PIN dialog for a locked remote; [then] runs after it was unlocked. */
+    private fun askPin(remote: String, then: () -> Unit) {
+        Dialogs.pin(this, remote) {
+            Remotes.markOpen(remote)
+            buildNav()
+            Remotes.refresh(this) { buildNav() }
+            then()
+        }
     }
 
     private fun spaceText(d: File): String =
@@ -216,7 +228,14 @@ class FilesActivity : BaseActivity() {
 
         items.add(NavItem(NavItem.DIVIDER))
         items.add(NavItem(NavItem.HEADER, title = "Remotes"))
-        for (n in Remotes.cached(this)) items.add(NavItem(NavItem.ITEM, R.drawable.ic_cloud, n, null, Loc(n, "")))
+        for (n in Remotes.cached(this)) {
+            val icon = when {
+                !Remotes.isLocked(this, n) -> R.drawable.ic_cloud
+                Remotes.isOpen(n) -> R.drawable.ic_lock_open
+                else -> R.drawable.ic_lock
+            }
+            items.add(NavItem(NavItem.ITEM, icon, n, null, Loc(n, "")))
+        }
         if (!pickMode) {
             items.add(NavItem(NavItem.DIVIDER))
             items.add(NavItem(NavItem.ITEM, R.drawable.ic_schedule, "Backup jobs", action = {
@@ -465,6 +484,18 @@ class FilesActivity : BaseActivity() {
                     }
                 }
             } catch (ex: Exception) {
+                if (Api.isLocked(ex) && l.remote != null) {   // locked, or the session ran out: ask for the PIN again
+                    ui.post {
+                        if (id == loadId) {
+                            swipe.isRefreshing = false
+                            Remotes.markClosed(l.remote)
+                            buildNav()
+                            showState("This remote is locked")
+                            askPin(l.remote) { load() }
+                        }
+                    }
+                    return@execute
+                }
                 ui.post {
                     if (id == loadId) {
                         swipe.isRefreshing = false

@@ -1,6 +1,6 @@
 [package]
 name = "rcm-core"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 description = "Core of Rclone Manager: API client, backup engine, file operations, caches and logs"
 publish = false

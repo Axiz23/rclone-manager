@@ -85,6 +85,11 @@ pub async fn fetch(remote: &str, file_path: &str, key: &str, tag: &str) -> Resul
     }
 }
 
+/// Forgets failed thumbnails so they are requested again (called after a remote is unlocked).
+pub fn forget_failures() {
+    with_failed(|m| m.clear());
+}
+
 pub fn size() -> Result<i64> {
     Ok(dir_size(&cache::thumbs_dir()?))
 }

@@ -36,6 +36,14 @@ impl Error {
         }
     }
 
+    /// "ApiException 502" / "IOException": kind plus HTTP status, for log lines.
+    pub fn describe(&self) -> String {
+        match self {
+            Error::Api { status, .. } => format!("ApiException {status}"),
+            other => other.kind().to_string(),
+        }
+    }
+
     /// Name of the Java exception class this error becomes (used in log lines).
     pub fn kind(&self) -> &'static str {
         match self {
